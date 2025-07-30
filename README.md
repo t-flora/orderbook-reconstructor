@@ -1,6 +1,15 @@
 
 Per the task description, I built the reconstructor project assuming a stream of events processed sequentially, using C++14.
 
+# Major optimization decisions
+- Using `string_view` to avoid heap allocations & memory copying during parsing
+
+# Minor optimization decisions
+- Using `final` classes since they have no derived classes
+
+# Potential improvements
+- Templates? If there's a world where more general implementations make sense, a header-only version of the source code could make sense.
+
 # Thought process
 What I had to figure out before starting:
 1. What exactly is this project supposed to accomplish? What does it do at runtime, and what's its input/output?

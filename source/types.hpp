@@ -1,10 +1,10 @@
 // Types for the MBO message parser / MBP writer
 #include <cstdint>
-#include <string>
+#include <string_view>
 #include <array>
 
-enum class Action { Add = 'A', Cancel = 'C', Clear = 'R'};
-enum class Side { Bid = 'B', Ask = 'A', None = 'N'};
+enum class Action { Add = 'A', Cancel = 'C', Clear = 'R' };
+enum class Side { Bid = 'B', Ask = 'A', None = 'N' };
 
 using Price = int64_t;
 using Size = uint32_t;
@@ -15,8 +15,8 @@ using Depth = uint8_t;
 
 // structs for plain old data
 struct MBOMessage {
-    std::string ts_recv; // fixed-length string, piped to MBP writer
-    std::string ts_event; // fixed-length string, piped to MBP writer
+    std::string_view ts_recv; // fixed-length string view to avoid heap allocations, piped to MBP writer
+    std::string_view ts_event; // piped to MBP writer
     // uint8_t rtype; // rtype is the same for every MBO message and MBP output row
     // uint16_t publisher_id; // so is publisher ID fixed for input/output
     // uint32_t instrument_id; // and instrument ID...
@@ -32,8 +32,8 @@ struct MBOMessage {
 };
 
 struct MBP10Snapshot {
-    std::string ts_recv;
-    std::string ts_event;
+    std::string_view ts_recv;
+    std::string_view ts_event;
     Action action;
     Side side;
     Depth depth; // 0-9, indicates level updated
