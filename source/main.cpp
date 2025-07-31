@@ -15,7 +15,8 @@ int main(int argc, char* argv[]) {
     const std::string input_file = argv[1];
     const std::string output_file = argc == 3 ? argv[2] : "data/output.mbp";
 
-    StreamingMBOParser mbo_parser(input_file);
+    std::ifstream input_file_stream(input_file);
+    StreamingMBOParser mbo_parser(input_file_stream);
     OrderBook order_book;
     MBPWriter mbp_writer(output_file);
 

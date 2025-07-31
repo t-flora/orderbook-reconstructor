@@ -13,8 +13,8 @@ $(BUILDDIR):
 $(BINARY): $(OBJECTS) | $(BUILDDIR)
 	$(CXX) $(OBJECTS) -o $(BINARY)
 
-# %.o: %.cpp
-#	 $(CXX) $(CXXFLAGS) -c $< -o $@
+%.o: %.cpp # Target rule for object files
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJECTS) $(BINARY)

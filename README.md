@@ -29,4 +29,4 @@ What I had to figure out before starting:
    - The parser and writer components are I/O-bound, while the engine is CPU-bound. This subdivision helps with testing and targeting performance improvements.
 5. What can I optimize for this particular sample data?
    - Many data fields in the input are just copied to the output file, with no processing. All those fields can be treated as string views to avoid type conversions.
-   - Processing a line at a time, it'd be great to use a stack allocation for the buffer holding each line.
+   - Processing a line at a time, it'd be great to use a stack allocation for the buffer holding each line. Running `awk '{print length($0)}' data/sample_dataset.csv | sort -n | tail -1` (on both input/output data) shows how small one can make the char buffer for holding lines in the sample. Going from type specifications, I computed the maximum char length of each field: input buffers for MBO messages can be much smaller since they don't hold the extra 60 fields for bid/ask level data, and have max size of 154 bytes. For cache segment alignment and safety, I set the buffer to 256 bytes (power of two, product of 64)
