@@ -51,6 +51,7 @@ struct MBOMessage {
     std::string_view symbol; // copy as-is to MBP writer
 };
 
+
 struct MBP10Snapshot {
     std::string_view ts_recv;
     std::string_view ts_event;
@@ -59,9 +60,13 @@ struct MBP10Snapshot {
     Depth depth; // 0-9, indicates level updated
     Price price;
     Size size;
-    uint8_t flags;
-    int32_t ts_in_delta;
-    uint32_t sequence;
+    std::string_view publisher_id_raw;
+    std::string_view instrument_id_raw;
+    std::string_view flags_raw;
+    std::string_view ts_in_delta_raw;
+    std::string_view sequence_raw;
+    std::string_view symbol;
+    OrderId order_id;
     struct Level { // Level struct allows for easy iteration over levels
         Price price;
         Size size;
@@ -70,6 +75,13 @@ struct MBP10Snapshot {
     std::array<Level,10> bid_levels;
     std::array<Level,10> ask_levels;
 };
+
+
+struct OrderBookView {
+    const std::array<MBP10Snapshot::Level,10>& bid_levels_;
+    const std::array<MBP10Snapshot::Level,10>& ask_levels_;
+};
+
 
 namespace buffer_utils {
     constexpr size_t next_power_of_2(size_t n) {

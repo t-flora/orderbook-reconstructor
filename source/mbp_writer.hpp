@@ -1,3 +1,4 @@
+#pragma once
 #include <fstream>
 #include "types.hpp"
 
@@ -15,7 +16,9 @@ constexpr size_t MAX_MBP_LINE_SIZE =
     3 + // 3 max chars for flags (uint8_t)
     11 + // 11 max chars for ts_in_delta (int32_t)
     10 + // 10 max chars for sequence (uint32_t)
-    3; // 3 chars for symbol
+    3 + // 3 chars for symbol
+    10*2*(20+10+10) // 10 levels * 2 (bid/ask) * (20 max chars for price + 10 max chars for size + 10 max chars for count)
+;
 
 constexpr size_t MIN_MBP_BUFFER_SIZE = buffer_utils::minimum_aligned_buffer_size(MAX_MBP_LINE_SIZE);
 
@@ -24,10 +27,13 @@ class MBPWriter final {
     private:
         std::ofstream file_;
         char output_buffer_[MIN_MBP_BUFFER_SIZE];
+        size_t row_index_;
+
+        void write_header();
 
     public:
         MBPWriter(const std::string& filename);
         ~MBPWriter();
 
-        void write_snapshot(const MBP10Snapshot& snapshot);
+        void write_snapshot(const MBOMessage& message, const OrderBookView& view);
 };
