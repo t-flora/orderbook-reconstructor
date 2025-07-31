@@ -14,9 +14,10 @@ using OrderId = uint64_t;
 using Depth = uint8_t;
 
 // structs for plain old data
+// data that will just be passed to MBP writer without modification will be stored as string views to avoid conversions
 struct MBOMessage {
-    std::string_view ts_recv; // fixed-length string view to avoid heap allocations, piped to MBP writer
-    std::string_view ts_event; // piped to MBP writer
+    // uint64_t ts_recv; // passed to MBP writer
+    // uint64_t ts_event; // passed to MBP writer
     // uint8_t rtype; // rtype is the same for every MBO message and MBP output row
     // uint16_t publisher_id; // so is publisher ID fixed for input/output
     // uint32_t instrument_id; // and instrument ID...
@@ -24,11 +25,21 @@ struct MBOMessage {
     Side side;
     Price price;
     Size size;
+    // uint8_t channel_id; // is constant in sample and not passed to MBP writer
     OrderId order_id;
-    uint8_t flags; // 8-bit integer, piped to MBP writer
-    int32_t ts_in_delta; // piped to MBP writer
-    uint32_t sequence; // piped to MBP writer
-    // char symbol[4]; // symbol is the same for the whole dataset
+    // uint8_t flags; // 8-bit integer, passed to MBP writer
+    // int32_t ts_in_delta; // passed to MBP writer
+    // uint32_t sequence; // passed to MBP writer
+
+    // string views to avoid heap allocations, piped to MBP writer
+    std::string_view ts_recv; // fixed-length string view to avoid heap allocations, piped to MBP writer
+    std::string_view ts_event; // piped to MBP writer
+    std::string_view publisher_id_raw; // copy as-is to MBP writer
+    std::string_view instrument_id_raw; // copy as-is to MBP writer
+    std::string_view flags_raw; // copy as-is to MBP writer
+    std::string_view ts_in_delta_raw; // copy as-is to MBP writer
+    std::string_view sequence_raw; // copy as-is to MBP writer
+    std::string_view symbol; // symbol is the same for the whole dataset, but we'll copy as-is to MBP writer for flexibility
 };
 
 struct MBP10Snapshot {

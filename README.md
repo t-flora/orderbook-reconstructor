@@ -1,5 +1,5 @@
-
-Per the task description, I built the reconstructor project assuming a stream of events processed sequentially, using C++14.
+# Order book reconstructor
+I built the reconstructor project assuming a stream of events processed sequentially, using C++14. It computes an MBP-10 order book from an MBO dataset, and is divided into 3 main components: MBO parser, order book reconstruction engine, and MBP writer.
 
 # Major optimization decisions
 - Using `string_view` to avoid heap allocations & memory copying during parsing
@@ -7,7 +7,11 @@ Per the task description, I built the reconstructor project assuming a stream of
 # Minor optimization decisions
 - Using `final` classes since they have no derived classes
 
-# Potential improvements
+# Desired improvements
+- 
+
+# Improvements?
+- Robustness to out-of-order messages. The project assumes MBO messages arrive sequentially, with timestamps always increasing as messages arrive. It's unclear to me how meaningful an improvement it would be to be robust to out-of-order messages - effectively rewriting MBP output? - so I'd be very curious to learn if it is.
 - Templates? If there's a world where more general implementations make sense, a header-only version of the source code could make sense.
 
 # Thought process
@@ -23,3 +27,6 @@ What I had to figure out before starting:
 4. What project structure would best fit project requirements?
    - Because there's structured input & output formats and a core order book reconstructor in between them, I can neatly subdivide the source code into an MBO "message parser" (reading individual rows), the reconstruction engine, and an MBP writer. 
    - The parser and writer components are I/O-bound, while the engine is CPU-bound. This subdivision helps with testing and targeting performance improvements.
+5. What can I optimize for this particular sample data?
+   - Many data fields in the input are just copied to the output file, with no processing. All those fields can be treated as string views to avoid type conversions.
+   - Processing a line at a time, it'd be great to use a stack allocation for the buffer holding each line.
