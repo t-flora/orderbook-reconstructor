@@ -45,7 +45,13 @@ bool StreamingMBOParser::parse_MBO_line(const std::string_view line, MBOMessage&
         message.order_id = static_cast<OrderId>(std::stoull(std::string(fields_[10])));
     }
     
-    message.flags_raw = fields_[11];
+    // Parse flags
+    if (!fields_[11].empty()) {
+        uint8_t flags_value = static_cast<uint8_t>(std::stoul(std::string(fields_[11])));
+        message.flags = Flag{flags_value};
+    } else {
+        message.flags = Flag{0};
+    }
     message.ts_in_delta_raw = fields_[12];
     message.sequence_raw = fields_[13];
     message.symbol = fields_[14];

@@ -32,3 +32,11 @@ What I had to figure out before starting:
    - Processing a line at a time, it'd be great to use a stack allocation for the buffer holding each line. Running `awk '{print length($0)}' data/sample_dataset.csv | sort -n | tail -1` (on both input/output data) shows how small one can make the char buffer for holding lines in the sample. Going from type specifications, I computed the maximum char length of each field: input buffers for MBO messages can be much smaller since they don't hold the extra 60 fields for bid/ask level data, and have max size of 154 bytes. For cache segment alignment and safety, I set the buffer to 256 bytes (power of two, product of 64)
 6. How should I handle each event in the order book logic?
    - Running `grep -E "^[0-9]" data/mbo.csv | cut -d',' -f6 | sort | uniq -c` shows there are 5 possible actions, including the 1 clear order book action at the beginning, 11 Trade actions (don't affect order book) and 11 Fill actions (don't affect order book)
+
+Input Message → OrderBook::apply_message() → ProcessResult
+                         ↓
+            Internal state management:
+            - T->F->C sequence tracking
+            - Actual orderbook modifications
+                         ↓
+            Return: {should_write, message_for_mbp}

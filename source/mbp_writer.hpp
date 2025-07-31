@@ -35,5 +35,5 @@ class MBPWriter final {
         MBPWriter(const std::string& filename);
         ~MBPWriter();
 
-        void write_snapshot(const MBOMessage& message, const OrderBookView& view, int depth = -1);
+        void write_snapshot(const MBOMessage& message, const std::vector<BidAskPair>& snapshot, int depth = -1);
 };

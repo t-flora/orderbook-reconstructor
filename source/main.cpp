@@ -1,6 +1,7 @@
 #include "mbo_parser.hpp"
 #include "mbp_writer.hpp"
 #include "order_book.hpp"
+#include "types.hpp"
 #include <iostream>
 #include <fstream>
 
@@ -28,18 +29,31 @@ int main(int argc, char* argv[]) {
 
     std::string line;
     
-    // Skip header line
+    // Skip header line  
     bool first_line = true;
+    
     while (std::getline(input_file_stream, line)) {
         if (first_line) {
             first_line = false;
             continue;
         }
         
-        MBOMessage message;
+        // Create MBOMessage with proper initialization
+        MBOMessage message{
+            Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)},
+            "", "", "", "", "", "", ""
+        };
+        
         if (mbo_parser.parse_MBO_line(line, message)) {
-            orderbook.Apply(message);
-            mbp_writer.write_snapshot(message, orderbook.get_snapshot());
+            // Apply message to orderbook and get processing result
+            auto result = orderbook.process_message(message);
+            
+            // Write to MBP only if top 10 levels changed
+            if (result.should_write_to_mbp) {
+                // Calculate depth AFTER applying changes
+                int depth = orderbook.get_order_depth(result.message_for_mbp);
+                mbp_writer.write_snapshot(result.message_for_mbp, orderbook.get_snapshot(10), depth);
+            }
         }
     }
 

@@ -46,10 +46,10 @@ void MBPWriter::write_header() {
               << ",ask_ct_" << std::setw(2) << std::setfill('0') << i;
     }
     
-    file_ << ",symbol,order_id\n";
+    file_ << ",symbol,order_id\r\n";
 }
 
-void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& view, int depth) {
+void MBPWriter::write_snapshot(const MBOMessage& message, const std::vector<BidAskPair>& snapshot, int depth) {
     // Write row index (unnamed first column)
     file_ << row_index_++;
     
@@ -71,32 +71,35 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& v
     }
     
     file_ << "," << message.size
-          << "," << message.flags_raw
+          << "," << static_cast<int>(message.flags.value)
           << "," << message.ts_in_delta_raw
           << "," << message.sequence_raw;
     
-    // Write bid/ask levels from order book view
+    // Write bid/ask levels from snapshot
     for (int i = 0; i < 10; ++i) {
+        // Get the pair for this level, or use empty values if not enough levels
+        const BidAskPair& pair = (i < snapshot.size()) ? snapshot[i] : BidAskPair{0, 0, 0, 0, 0, 0};
+        
         // Bid level
-        if (view.bid_levels_[i].price != 0) {
-            file_ << "," << format_price(view.bid_levels_[i].price / 1E9);
+        if (pair.bid_px != 0) {
+            file_ << "," << format_price(pair.bid_px / 1E9);
         } else {
             file_ << ",";
         }
-        file_ << "," << view.bid_levels_[i].size
-              << "," << view.bid_levels_[i].count;
+        file_ << "," << pair.bid_sz
+              << "," << pair.bid_ct;
         
         // Ask level
-        if (view.ask_levels_[i].price != 0) {
-            file_ << "," << format_price(view.ask_levels_[i].price / 1E9);
+        if (pair.ask_px != 0) {
+            file_ << "," << format_price(pair.ask_px / 1E9);
         } else {
             file_ << ",";
         }
-        file_ << "," << view.ask_levels_[i].size
-              << "," << view.ask_levels_[i].count;
+        file_ << "," << pair.ask_sz
+              << "," << pair.ask_ct;
     }
     
     // Write symbol and order_id
     file_ << "," << message.symbol
-          << "," << message.order_id << "\n";
+          << "," << message.order_id << "\r\n";
 }

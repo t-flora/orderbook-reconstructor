@@ -20,8 +20,14 @@ class OrderBook {
         uint32_t get_queue_pos(OrderId order_id);
     
         std::vector<BidAskPair> get_snapshot(size_t level_count = 1) const;
-    
-        void apply_message(const MBOMessage& mbo);
+        int get_order_depth(const MBOMessage& mbo) const;
+
+        struct ProcessResult {
+            bool should_write_to_mbp;
+            MBOMessage message_for_mbp;
+        };
+        
+        ProcessResult process_message(const MBOMessage& mbo);
    
     private:
         using LevelOrders = std::vector<MBOMessage>;
@@ -34,6 +40,7 @@ class OrderBook {
     
         static Level get_price_level(Price price, const LevelOrders& level);
         static LevelOrders::iterator get_level_order(LevelOrders& level, OrderId order_id);
+        bool top12_levels_changed();
     
         void clear_order();
         void add_order(MBOMessage mbo);
@@ -48,4 +55,11 @@ class OrderBook {
         Orders orders_by_id_;
         SideLevels offers_;
         SideLevels bids_;
+        
+        // T->F->C sequence tracking
+        MBOMessage pending_trade_{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""};
+        bool has_pending_trade_{false};
+        
+        // Top 10 level change tracking
+        mutable std::vector<BidAskPair> previous_top12_;
    };

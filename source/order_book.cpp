@@ -1,14 +1,12 @@
 #include "order_book.hpp"
 
-OrderBook::OrderBook() {
-    // initialize the order book
-}
+// Constructor implementation removed - using default constructor
 
 std::pair<Level, Level> OrderBook::get_BBO() const {
     return {get_bid_level(), get_ask_level()};
 }
 
-Level OrderBook::get_bid_level(size_t idx = 0) const {
+Level OrderBook::get_bid_level(size_t idx) const {
     if (bids_.size() > idx) {
         auto level_it = bids_.rbegin(); // reverse iterator to get highest bid prices first
         std::advance(level_it, idx);
@@ -17,7 +15,7 @@ Level OrderBook::get_bid_level(size_t idx = 0) const {
     return Level{};
 }
 
-Level OrderBook::get_ask_level(size_t idx = 0) const {
+Level OrderBook::get_ask_level(size_t idx) const {
     if (offers_.size() > idx) {
         auto level_it = offers_.begin();
         std::advance(level_it, idx);
@@ -70,7 +68,7 @@ uint32_t OrderBook::get_queue_pos(OrderId order_id) {
     return prior_size;
 }
 
-std::vector<BidAskPair> OrderBook::get_snapshot(std::size_t level_count = 1) const {
+std::vector<BidAskPair> OrderBook::get_snapshot(std::size_t level_count) const {
     std::vector<BidAskPair> res;
     for (size_t i = 0; i < level_count; ++i) {
         BidAskPair ba_pair{0, 0, 0, 0, 0, 0};
@@ -91,37 +89,145 @@ std::vector<BidAskPair> OrderBook::get_snapshot(std::size_t level_count = 1) con
     return res;
 }
 
+bool OrderBook::top12_levels_changed() {
+    auto current_top12 = get_snapshot(12);
+    
+    // First call - always consider changed to write initial state
+    if (previous_top12_.empty()) {
+        previous_top12_ = current_top12;
+        return true;
+    }
+    
+    // Compare with previous snapshot
+    bool changed = false;
+    if (previous_top12_.size() != current_top12.size()) {
+        changed = true;
+    } else {
+        for (size_t i = 0; i < previous_top12_.size(); ++i) {
+            const auto& prev = previous_top12_[i];
+            const auto& curr = current_top12[i];
+            if (prev.bid_px != curr.bid_px || prev.bid_sz != curr.bid_sz || prev.bid_ct != curr.bid_ct ||
+                prev.ask_px != curr.ask_px || prev.ask_sz != curr.ask_sz || prev.ask_ct != curr.ask_ct) {
+                changed = true;
+                break;
+            }
+        }
+    }
+    
+    // Update previous snapshot if changed
+    if (changed) {
+        previous_top12_ = current_top12;
+    }
+    
+    return changed;
+}
 
+int OrderBook::get_order_depth(const MBOMessage& mbo) const {
+    const SideLevels& levels = (mbo.side == Side::Bid) ? bids_ : offers_;
+    
+    int depth = 0;
+    if (mbo.side == Side::Bid) {
+        // For bids, iterate from highest price (best) to lowest
+        for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
+            if (it->first == mbo.price) {
+                return depth;
+            }
+            depth++;
+        }
+    } else if (mbo.side == Side::Ask) {
+        // For asks, iterate from lowest price (best) to highest  
+        for (auto it = levels.begin(); it != levels.end(); ++it) {
+            if (it->first == mbo.price) {
+                return depth;
+            }
+            depth++;
+        }
+    }
+    
+    // If price not found, return 0 (will be at top level after add)
+    return 0;
+}
 
-void OrderBook::apply_message(const MBOMessage& mbo) {
+OrderBook::ProcessResult OrderBook::process_message(const MBOMessage& mbo) {
+    // Handle T->F->C sequences
+    if (mbo.action == Action::Trade) {
+        // If side is 'N', ignore as per task requirements
+        if (mbo.side == Side::None) {
+            return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}};
+        }
+        // Store the trade for potential T->F->C sequence
+        pending_trade_ = mbo;
+        has_pending_trade_ = true;
+        return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}};
+    }
+    
+    if (mbo.action == Action::Fill && has_pending_trade_) {
+        // Skip the Fill action, continue looking for Cancel
+        return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}};
+    }
+    
+    if (mbo.action == Action::Cancel && has_pending_trade_) {
+        // This completes a T->F->C sequence
+        // Apply the cancel (which reduces the existing order on the book)
+        cancel_order(mbo);
+        
+        // Create a trade message for the MBP output
+        MBOMessage trade_message = pending_trade_;
+        trade_message.action = Action::Trade;
+        // The cancel shows which side is being reduced, so use that side
+        trade_message.side = mbo.side;
+        trade_message.price = mbo.price;
+        trade_message.size = mbo.size;
+        trade_message.order_id = mbo.order_id;
+        
+        has_pending_trade_ = false;
+        return {top12_levels_changed(), trade_message};
+    }
+    
+    // Reset pending trade if we encounter other actions
+    if (has_pending_trade_ && mbo.action != Action::Fill && mbo.action != Action::Cancel) {
+        has_pending_trade_ = false;
+    }
+    
+    // Handle regular messages
     switch (mbo.action) {
         case Action::Clear: {
             clear_order();
-            break;
+            // Clear changes order book state - write to MBP if top 10 levels changed
+            return {top12_levels_changed(), mbo};
         }
         case Action::Add: {
             add_order(mbo);
-            break;
+            // Add changes order book state - write to MBP if top 10 levels changed
+            return {top12_levels_changed(), mbo};
         }
         case Action::Cancel: {
             cancel_order(mbo);
-            break;
+            // Cancel changes order book state - write to MBP if top 10 levels changed
+            return {top12_levels_changed(), mbo};
         }
-        case Action::Trade:
-        case Action::Fill:
-        // case Action::None: {
-        //     break;
-        // }
+        case Action::Trade: {
+            // Trade actions do NOT affect the orderbook per task requirements
+            // Only the Cancel in T->F->C sequences affects the orderbook
+            // Do not write to MBP for standalone trades
+            return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}};
+        }
+        case Action::Fill: {
+            // Fill actions don't directly affect the orderbook
+            // They are intermediate actions in T->F->C sequences
+            // Do not write to MBP for fills
+            return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}};
+        }
         default: {
-        throw std::invalid_argument{std::string{"Unknown action: "} +
-                                    static_cast<char>(mbo.action)};
+            throw std::invalid_argument{std::string{"Unknown action: "} +
+                                        static_cast<char>(mbo.action)};
         }
     }
 }
 
 
 Level OrderBook::get_price_level(Price price, const LevelOrders& level) {
-    Level res{price};
+    Level res{price, 0, 0};
     for (const auto& order : level) {
         if (!order.flags.has(F_TOB)) { // if order is not top-of-book
             ++res.count;
