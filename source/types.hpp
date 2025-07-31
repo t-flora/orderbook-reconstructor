@@ -12,7 +12,57 @@ using Size = uint32_t;
 using Count = uint32_t;
 using OrderId = uint64_t;
 
+// flag constants
+constexpr uint8_t F_LAST = 128;
+constexpr uint8_t F_TOB = 64;
+constexpr uint8_t F_SNAPSHOT = 32;
+constexpr uint8_t F_MBP = 16;
+constexpr uint8_t F_BAD_TS_RECV = 8;
+constexpr uint8_t F_MAYBE_BAD_BOOK = 4;
+
+struct Flag {
+    uint8_t value;
+    
+    explicit Flag(uint8_t v) : value(v) {}
+    
+    bool has(uint8_t flag) const {
+        return (value & flag) != 0;
+    }
+    
+    // overload for multiple flags
+    bool has_all(uint8_t flags) const {
+        return (value & flags) == flags;
+    }
+    
+    bool has_any(uint8_t flags) const {
+        return (value & flags) != 0;
+    }
+};
+
 using Depth = uint8_t;
+
+struct Level { // Level struct allows for easy iteration over levels
+    Price price;
+    Size size;
+    Count count;
+    
+    bool operator==(const Level& other) const {
+        return price == other.price && size == other.size && count == other.count;
+    }
+
+    bool is_empty() const { return price == 0; }
+
+    operator bool() const { return !is_empty(); }
+};
+
+struct BidAskPair {
+    Price bid_px;
+    Size bid_sz;
+    Count bid_ct;
+    Price ask_px;
+    Size ask_sz;
+    Count ask_ct;
+};
 
 // structs for plain old data
 // data that will just be passed to MBP writer without modification will be stored as string views to avoid conversions
@@ -27,6 +77,7 @@ struct MBOMessage {
     Price price;
     Size size;
     OrderId order_id;
+    Flag flags;
 
     ////// string views to avoid heap allocations, piped to MBP writer //////
     //// fields that are passed to MBP writer ////
@@ -45,7 +96,6 @@ struct MBOMessage {
     std::string_view ts_event; // piped to MBP writer
     std::string_view publisher_id_raw; // copy as-is to MBP writer
     std::string_view instrument_id_raw; // copy as-is to MBP writer
-    std::string_view flags_raw; // copy as-is to MBP writer
     std::string_view ts_in_delta_raw; // copy as-is to MBP writer
     std::string_view sequence_raw; // copy as-is to MBP writer
     std::string_view symbol; // copy as-is to MBP writer
@@ -67,23 +117,14 @@ struct MBP10Snapshot {
     std::string_view sequence_raw;
     std::string_view symbol;
     OrderId order_id;
-    struct Level { // Level struct allows for easy iteration over levels
-        Price price;
-        Size size;
-        Count count;
-        
-        bool operator==(const Level& other) const {
-            return price == other.price && size == other.size && count == other.count;
-        }
-    };
     std::array<Level,10> bid_levels;
     std::array<Level,10> ask_levels;
 };
 
 
 struct OrderBookView {
-    const std::array<MBP10Snapshot::Level,10>& bid_levels_;
-    const std::array<MBP10Snapshot::Level,10>& ask_levels_;
+    const std::array<Level,10>& bid_levels_;
+    const std::array<Level,10>& ask_levels_;
 };
 
 

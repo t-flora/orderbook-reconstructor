@@ -23,15 +23,14 @@ int main(int argc, char* argv[]) {
     }
 
     StreamingMBOParser mbo_parser(input_file_stream);
-    OrderBook order_book;
+    OrderBook orderbook;
     MBPWriter mbp_writer(output_file);
 
     std::string line;
-    // ignore first line with column headers
-    bool first_line = true;
     
+    // Skip header line
+    bool first_line = true;
     while (std::getline(input_file_stream, line)) {
-        // Skip header line
         if (first_line) {
             first_line = false;
             continue;
@@ -39,19 +38,8 @@ int main(int argc, char* argv[]) {
         
         MBOMessage message;
         if (mbo_parser.parse_MBO_line(line, message)) {
-            auto result = order_book.process_MBO_msg(message);
-            
-            // Write MBP snapshot if the order book state actually changed
-            if (result.affected_level_index != -1) {
-                auto view = order_book.get_view();
-                mbp_writer.write_snapshot(message, view, result.affected_level_index);
-            }
-            
-            // Write combined trade action from T/F/C sequence if present
-            if (result.has_combined_trade) {
-                auto view = order_book.get_view();
-                mbp_writer.write_snapshot(result.combined_trade_action, view, -1);
-            }
+            orderbook.Apply(message);
+            mbp_writer.write_snapshot(message, orderbook.get_snapshot());
         }
     }
 
