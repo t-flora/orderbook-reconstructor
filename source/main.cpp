@@ -40,10 +40,17 @@ int main(int argc, char* argv[]) {
         MBOMessage message;
         if (mbo_parser.parse_MBO_line(line, message)) {
             auto result = order_book.process_MBO_msg(message);
-            // Only write MBP snapshot if the order book state actually changed
+            
+            // Write MBP snapshot if the order book state actually changed
             if (result.affected_level_index != -1) {
                 auto view = order_book.get_view();
                 mbp_writer.write_snapshot(message, view, result.affected_level_index);
+            }
+            
+            // Write combined trade action from T/F/C sequence if present
+            if (result.has_combined_trade) {
+                auto view = order_book.get_view();
+                mbp_writer.write_snapshot(result.combined_trade_action, view, -1);
             }
         }
     }

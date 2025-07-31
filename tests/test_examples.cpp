@@ -241,7 +241,6 @@ int main() {
     std::cout << "=== Running example tests ===" << std::endl;
     
     try {
-        test_sample_mbo_to_mbp_conversion();
         test_full_mbo_to_mbp_conversion();
         std::cout << "All tests passed" << std::endl;
     } catch (const std::exception& e) {

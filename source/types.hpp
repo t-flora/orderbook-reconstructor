@@ -4,7 +4,7 @@
 #include <string_view>
 #include <array>
 
-enum class Action { Add = 'A', Cancel = 'C', Clear = 'R' };
+enum class Action { Add = 'A', Cancel = 'C', Clear = 'R', Trade = 'T', Fill = 'F' };
 enum class Side { Bid = 'B', Ask = 'A', None = 'N' };
 
 using Price = int64_t;
@@ -71,6 +71,10 @@ struct MBP10Snapshot {
         Price price;
         Size size;
         Count count;
+        
+        bool operator==(const Level& other) const {
+            return price == other.price && size == other.size && count == other.count;
+        }
     };
     std::array<Level,10> bid_levels;
     std::array<Level,10> ask_levels;
