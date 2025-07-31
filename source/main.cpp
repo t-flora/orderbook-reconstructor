@@ -39,9 +39,12 @@ int main(int argc, char* argv[]) {
         
         MBOMessage message;
         if (mbo_parser.parse_MBO_line(line, message)) {
-            order_book.process_MBO_msg(message);
-            auto view = order_book.get_view();
-            mbp_writer.write_snapshot(message, view);
+            auto result = order_book.process_MBO_msg(message);
+            // Only write MBP snapshot if the order book state actually changed
+            if (result.affected_level_index != -1) {
+                auto view = order_book.get_view();
+                mbp_writer.write_snapshot(message, view, result.affected_level_index);
+            }
         }
     }
 

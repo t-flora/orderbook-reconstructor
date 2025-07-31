@@ -1,5 +1,22 @@
 #include "mbp_writer.hpp"
 #include <iomanip>
+#include <sstream>
+
+// Helper function to format price without trailing zeros
+std::string format_price(double price) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(9) << price;
+    std::string str = oss.str();
+    
+    // Remove trailing zeros
+    str.erase(str.find_last_not_of('0') + 1, std::string::npos);
+    // Remove trailing decimal point if no fractional part
+    if (str.back() == '.') {
+        str.pop_back();
+    }
+    
+    return str;
+}
 
 MBPWriter::MBPWriter(const std::string& filename) : file_(filename), row_index_(0) {
     if (!file_.is_open()) {
@@ -32,7 +49,7 @@ void MBPWriter::write_header() {
     file_ << ",symbol,order_id\n";
 }
 
-void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& view) {
+void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& view, int depth) {
     // Write row index (unnamed first column)
     file_ << row_index_++;
     
@@ -44,11 +61,11 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& v
           << "," << message.instrument_id_raw
           << "," << static_cast<char>(message.action)
           << "," << static_cast<char>(message.side)
-          << ",0"; // depth - TODO: calculate proper depth for changed level
+          << "," << (depth >= 0 ? depth : 0);
     
     // Write price and size - convert back from nanos to decimal
     if (message.price != 0) {
-        file_ << "," << std::fixed << std::setprecision(2) << (message.price / 1000000000.0);
+        file_ << "," << format_price(message.price / 1E9);
     } else {
         file_ << ",";
     }
@@ -62,7 +79,7 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& v
     for (int i = 0; i < 10; ++i) {
         // Bid level
         if (view.bid_levels_[i].price != 0) {
-            file_ << "," << std::fixed << std::setprecision(2) << (view.bid_levels_[i].price / 1E9);
+            file_ << "," << format_price(view.bid_levels_[i].price / 1E9);
         } else {
             file_ << ",";
         }
@@ -71,7 +88,7 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const OrderBookView& v
         
         // Ask level
         if (view.ask_levels_[i].price != 0) {
-            file_ << "," << std::fixed << std::setprecision(2) << (view.ask_levels_[i].price / 1E9);
+            file_ << "," << format_price(view.ask_levels_[i].price / 1E9);
         } else {
             file_ << ",";
         }
