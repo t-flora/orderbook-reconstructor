@@ -1,7 +1,6 @@
 #include "order_book.hpp"
 
 // Constructor implementation removed - using default constructor
-
 std::pair<Level, Level> OrderBook::get_BBO() const {
     return {get_bid_level(), get_ask_level()};
 }

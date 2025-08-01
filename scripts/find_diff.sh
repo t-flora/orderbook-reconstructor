@@ -1,5 +1,5 @@
 find_data_diff() {
-    local actual_file="${1:-data/test/test_output_full_mbp.csv}"
+    local actual_file="${1:-data/test/test_output.csv}"
     local expected_file="${2:-data/mbp.csv}"
     
     echo "Comparing: $actual_file vs $expected_file"

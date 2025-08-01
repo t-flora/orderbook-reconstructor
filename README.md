@@ -1,14 +1,22 @@
 # Order book reconstructor
-I built the reconstructor project assuming a stream of events processed sequentially, using C++14. It computes an MBP-10 order book from an MBO dataset, and is divided into 3 main components: MBO parser, order book reconstruction engine, and MBP writer.
+I built the reconstructor project assuming a stream of events processed sequentially, using C++14. It computes an MBP-10 order book from an MBO dataset, and is divided into 3 main components: MBO parser, order book reconstruction engine, and MBP writer. I drew heavy inspiration from the Databento example to understand the functioning of the order book class.
 
-# Major optimization decisions
+## Optimization decisions
 - Using `string_view` to avoid heap allocations & memory copying during parsing
-
-# Minor optimization decisions
 - Using `final` classes since they have no derived classes
+- Using `constexpr` where possible
+
+# Required fixes
+- Correct handling of order book depth for output: events with depth greater than 11 are written, and some events with depth = 0 are missed (35/878 lines)
+- Correct handling of order book updates: a few updates are triggered where they shouldn't, or missed when they should. During work on this task, I oscillated between writing too much and too little.
 
 # Desired improvements
-- 
+- Faster parsing of input values and faster output writing using fixed size char buffers, and using buffers directly
+- Using memory-mapped files for the MBO parser, eliminating string conversions for fast integer parsing
+- Avoiding double conversion for price parsing - parsing directly to fixed-point
+- Pre-formatted caches for values like prices to avoid formatting multiple times
+- Test alternative containers for order book data structures, e.g. sorted vectors instead of `std::map` if for small vector sizes it's worth it
+- Tracking order book state changes incrementally
 
 # Improvements?
 - Robustness to out-of-order messages. The project assumes MBO messages arrive sequentially, with timestamps always increasing as messages arrive. It's unclear to me how meaningful an improvement it would be to be robust to out-of-order messages - effectively rewriting MBP output? - so I'd be very curious to learn if it is.
@@ -32,11 +40,4 @@ What I had to figure out before starting:
    - Processing a line at a time, it'd be great to use a stack allocation for the buffer holding each line. Running `awk '{print length($0)}' data/sample_dataset.csv | sort -n | tail -1` (on both input/output data) shows how small one can make the char buffer for holding lines in the sample. Going from type specifications, I computed the maximum char length of each field: input buffers for MBO messages can be much smaller since they don't hold the extra 60 fields for bid/ask level data, and have max size of 154 bytes. For cache segment alignment and safety, I set the buffer to 256 bytes (power of two, product of 64)
 6. How should I handle each event in the order book logic?
    - Running `grep -E "^[0-9]" data/mbo.csv | cut -d',' -f6 | sort | uniq -c` shows there are 5 possible actions, including the 1 clear order book action at the beginning, 11 Trade actions (don't affect order book) and 11 Fill actions (don't affect order book)
-
-Input Message → OrderBook::apply_message() → ProcessResult
-                         ↓
-            Internal state management:
-            - T->F->C sequence tracking
-            - Actual orderbook modifications
-                         ↓
-            Return: {should_write, message_for_mbp}
+   - It took a while to figure out what 'depth=11' updates were, but I realized they were cancel orders for orders that were pushed out of the top 10 levels of the orderbook.

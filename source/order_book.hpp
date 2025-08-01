@@ -8,6 +8,7 @@ using namespace std;
 
 class OrderBook {
     public:
+        OrderBook() = default;
         std::pair<Level, Level> get_BBO() const;
     
         Level get_bid_level(size_t idx = 0) const;

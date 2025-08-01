@@ -1,7 +1,7 @@
 #include "mbo_parser.hpp"
 #include <cstring>
 
-StreamingMBOParser::StreamingMBOParser(std::ifstream& file) {
+StreamingMBOParser::StreamingMBOParser() {
     fields_.fill(std::string_view());
 }
 

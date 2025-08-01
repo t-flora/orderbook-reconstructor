@@ -6,16 +6,17 @@
 #include <fstream>
 
 int main(int argc, char* argv[]) {
+
+    const std::string input_file = argv[1];
+    const std::string output_file = argc == 3 ? argv[2] : "data/actual_output.csv";
+
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <input_file> [output_file]" << std::endl;
         return 1;
     }
     if (argc == 2) {
-        std::cout << "No output file provided, using default: data/output.mbp" << std::endl;
+        std::cout << "No output file provided, using default: " << output_file << std::endl;
     }
-
-    const std::string input_file = argv[1];
-    const std::string output_file = argc == 3 ? argv[2] : "data/output.mbp";
 
     std::ifstream input_file_stream(input_file);
     if (!input_file_stream.is_open()) {
@@ -23,7 +24,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    StreamingMBOParser mbo_parser(input_file_stream);
+    StreamingMBOParser mbo_parser;
     OrderBook orderbook;
     MBPWriter mbp_writer(output_file);
 

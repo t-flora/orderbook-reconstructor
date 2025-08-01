@@ -26,7 +26,6 @@ constexpr size_t MIN_MBP_BUFFER_SIZE = buffer_utils::minimum_aligned_buffer_size
 class MBPWriter final {
     private:
         std::ofstream file_;
-        char output_buffer_[MIN_MBP_BUFFER_SIZE];
         size_t row_index_;
 
         void write_header();

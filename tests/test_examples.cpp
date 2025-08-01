@@ -113,7 +113,7 @@ void test_full_mbo_to_mbp_conversion() {
     // Define file paths
     const std::string input_file = "data/mbo.csv";
     const std::string expected_output = "data/mbp.csv";
-    const std::string test_output = "data/test/test_output_full_mbp.csv";
+    const std::string test_output = "data/test/test_output.csv";
     const std::string executable = "build/reconstructor_TiagoFlora";
     
     // Check if required files exist
