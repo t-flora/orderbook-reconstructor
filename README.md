@@ -17,10 +17,11 @@ I built the reconstructor project assuming a stream of events processed sequenti
 - Pre-formatted caches for values like prices to avoid formatting multiple times
 - Test alternative containers for order book data structures, e.g. sorted vectors instead of `std::map` if for small vector sizes it's worth it
 - Tracking order book state changes incrementally
+- Defining a Dockerfile for reproducibility in different environments
 
 # Improvements?
 - Robustness to out-of-order messages. The project assumes MBO messages arrive sequentially, with timestamps always increasing as messages arrive. It's unclear to me how meaningful an improvement it would be to be robust to out-of-order messages - effectively rewriting MBP output? - so I'd be very curious to learn if it is.
-- Templates? If there's a world where more general implementations make sense, a header-only version of the source code could make sense.
+- Templates? If there's a world where more general implementations make sense, a header-only version of the source code could become worth it.
 
 # Thought process
 What I had to figure out before starting:
