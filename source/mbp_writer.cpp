@@ -61,7 +61,7 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const std::vector<BidA
           << "," << message.instrument_id_raw
           << "," << static_cast<char>(message.action)
           << "," << static_cast<char>(message.side)
-          << "," << (depth >= 0 ? depth : 0);
+          << "," << depth;
     
     // Write price and size - convert back from nanos to decimal
     if (message.price != 0) {

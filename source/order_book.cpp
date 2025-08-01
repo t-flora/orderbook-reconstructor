@@ -127,25 +127,26 @@ int OrderBook::get_order_depth(const MBOMessage& mbo) const {
     
     int depth = 0;
     if (mbo.side == Side::Bid) {
-        // For bids, iterate from highest price (best) to lowest
+        // For bids, count how many levels have better (higher) prices
         for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
-            if (it->first == mbo.price) {
-                return depth;
+            if (it->first > mbo.price) {
+                depth++;
+            } else {
+                break; // Found our price level or worse
             }
-            depth++;
         }
     } else if (mbo.side == Side::Ask) {
-        // For asks, iterate from lowest price (best) to highest  
+        // For asks, count how many levels have better (lower) prices  
         for (auto it = levels.begin(); it != levels.end(); ++it) {
-            if (it->first == mbo.price) {
-                return depth;
+            if (it->first < mbo.price) {
+                depth++;
+            } else {
+                break; // Found our price level or worse
             }
-            depth++;
         }
     }
     
-    // If price not found, return 0 (will be at top level after add)
-    return 0;
+    return depth;
 }
 
 OrderBook::ProcessResult OrderBook::process_message(const MBOMessage& mbo) {
