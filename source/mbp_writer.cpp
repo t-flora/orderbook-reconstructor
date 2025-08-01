@@ -1,17 +1,20 @@
 #include "mbp_writer.hpp"
 #include <iomanip>
 #include <sstream>
+#include <cmath>
 
-// Helper function to format price without trailing zeros
+// Helper function to format price with smart decimal precision
 std::string format_price(double price) {
+    // Round to 2 decimal places first to avoid floating point precision issues
+    double rounded = std::round(price * 100.0) / 100.0;
+    
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(9) << price;
+    oss << std::fixed << std::setprecision(2) << rounded;
     std::string str = oss.str();
     
-    // Remove trailing zeros
-    str.erase(str.find_last_not_of('0') + 1, std::string::npos);
-    // Remove trailing decimal point if no fractional part
-    if (str.back() == '.') {
+    // If it ends with '0', check if we should use 1 decimal place instead
+    if (str.back() == '0' && str[str.length()-2] != '.') {
+        // Remove the trailing zero to show only 1 decimal place
         str.pop_back();
     }
     

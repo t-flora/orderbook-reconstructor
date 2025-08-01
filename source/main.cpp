@@ -50,9 +50,8 @@ int main(int argc, char* argv[]) {
             
             // Write to MBP only if top 10 levels changed
             if (result.should_write_to_mbp) {
-                // Calculate depth AFTER applying changes
-                int depth = orderbook.get_order_depth(result.message_for_mbp);
-                mbp_writer.write_snapshot(result.message_for_mbp, orderbook.get_snapshot(10), depth);
+                // Use depth calculated in ProcessResult (handles depth >= 11 correctly)
+                mbp_writer.write_snapshot(result.message_for_mbp, orderbook.get_snapshot(10), result.depth);
             }
         }
     }

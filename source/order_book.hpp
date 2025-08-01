@@ -25,6 +25,7 @@ class OrderBook {
         struct ProcessResult {
             bool should_write_to_mbp;
             MBOMessage message_for_mbp;
+            int depth;
         };
         
         ProcessResult process_message(const MBOMessage& mbo);
