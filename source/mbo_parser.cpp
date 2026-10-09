@@ -84,9 +84,32 @@ Price StreamingMBOParser::parse_price(const std::string_view price_str) {
     if (price_str.empty()) {
         return 0;
     }
-    
-    // Convert price from double string to fixed-point integer (multiply by 1e9 for nano precision)
-    std::string price_string(price_str);
-    double price_double = std::stod(price_string);
-    return static_cast<Price>(price_double * 1E9); // Convert to nanos
+
+    // parse the decimal string directly to fixed-point nanos, avoiding double rounding errors
+    constexpr int PRICE_DECIMALS = 9;
+    size_t i = 0;
+    bool negative = price_str[0] == '-';
+    if (negative) {
+        ++i;
+    }
+
+    Price integer_part = 0;
+    for (; i < price_str.size() && price_str[i] != '.'; ++i) {
+        integer_part = integer_part * 10 + (price_str[i] - '0');
+    }
+
+    Price fractional_part = 0;
+    int decimals = 0;
+    if (i < price_str.size()) {
+        ++i; // skip '.'
+        for (; i < price_str.size() && decimals < PRICE_DECIMALS; ++i, ++decimals) {
+            fractional_part = fractional_part * 10 + (price_str[i] - '0');
+        }
+    }
+    for (; decimals < PRICE_DECIMALS; ++decimals) {
+        fractional_part *= 10;
+    }
+
+    Price price = integer_part * 1'000'000'000 + fractional_part;
+    return negative ? -price : price;
 }

@@ -88,39 +88,6 @@ std::vector<BidAskPair> OrderBook::get_snapshot(std::size_t level_count) const {
     return res;
 }
 
-bool OrderBook::top12_levels_changed() {
-    auto current_top12 = get_snapshot(12);
-    
-    // First call - always consider changed to write initial state
-    if (previous_top12_.empty()) {
-        previous_top12_ = current_top12;
-        return true;
-    }
-    
-    // Compare with previous snapshot
-    bool changed = false;
-    if (previous_top12_.size() != current_top12.size()) {
-        changed = true;
-    } else {
-        for (size_t i = 0; i < previous_top12_.size(); ++i) {
-            const auto& prev = previous_top12_[i];
-            const auto& curr = current_top12[i];
-            if (prev.bid_px != curr.bid_px || prev.bid_sz != curr.bid_sz || prev.bid_ct != curr.bid_ct ||
-                prev.ask_px != curr.ask_px || prev.ask_sz != curr.ask_sz || prev.ask_ct != curr.ask_ct) {
-                changed = true;
-                break;
-            }
-        }
-    }
-    
-    // Update previous snapshot if changed
-    if (changed) {
-        previous_top12_ = current_top12;
-    }
-    
-    return changed;
-}
-
 int OrderBook::get_order_depth(const MBOMessage& mbo) const {
     const SideLevels& levels = (mbo.side == Side::Bid) ? bids_ : offers_;
     
@@ -149,104 +116,57 @@ int OrderBook::get_order_depth(const MBOMessage& mbo) const {
 }
 
 OrderBook::ProcessResult OrderBook::process_message(const MBOMessage& mbo) {
-    // Handle T->F->C sequences
-    if (mbo.action == Action::Trade) {
-        // If side is 'N', ignore as per task requirements
-        if (mbo.side == Side::None) {
-            return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}, 0};
-        }
-        // Store the trade for potential T->F->C sequence
-        pending_trade_ = mbo;
-        has_pending_trade_ = true;
-        return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}, 0};
-    }
-    
-    if (mbo.action == Action::Fill && has_pending_trade_) {
-        // Skip the Fill action, continue looking for Cancel
-        return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}, 0};
-    }
-    
-    if (mbo.action == Action::Cancel && has_pending_trade_) {
-        // This completes a T->F->C sequence
-        // Check if the order exists in the book first to get its depth before canceling
-        auto order_it = orders_by_id_.find(mbo.order_id);
-        int depth_before_cancel = 0;
-        if (order_it != orders_by_id_.end()) {
-            // Create a temporary message with the order's actual price and side for depth calculation
-            MBOMessage temp_mbo = mbo;
-            temp_mbo.price = order_it->second.price;
-            temp_mbo.side = order_it->second.side;
-            depth_before_cancel = get_order_depth(temp_mbo);
-        }
-        
-        // Apply the cancel (which reduces the existing order on the book)
-        cancel_order(mbo);
-        
-        // Create a trade message for the MBP output
-        MBOMessage trade_message = pending_trade_;
-        trade_message.action = Action::Trade;
-        // The cancel shows which side is being reduced, so use that side
-        trade_message.side = mbo.side;
-        trade_message.price = mbo.price;
-        trade_message.size = mbo.size;
-        trade_message.order_id = mbo.order_id;
-        
-        has_pending_trade_ = false;
-        return {top12_levels_changed(), trade_message, depth_before_cancel};
-    }
-    
-    // Reset pending trade if we encounter other actions
-    if (has_pending_trade_ && mbo.action != Action::Fill && mbo.action != Action::Cancel) {
-        has_pending_trade_ = false;
-    }
-    
-    // Handle regular messages
     switch (mbo.action) {
         case Action::Clear: {
+            has_pending_trade_ = false;
             clear_order();
-            // Clear changes order book state - write to MBP if top 10 levels changed
-            return {top12_levels_changed(), mbo, get_order_depth(mbo)};
+            return {true, mbo, 0};
         }
         case Action::Add: {
-            // Calculate depth before adding the order
-            int depth_before_add = get_order_depth(mbo);
+            has_pending_trade_ = false;
+            // depth is computed before adding the order
+            int depth = get_order_depth(mbo);
             add_order(mbo);
-            
-            // Only trigger MBP update if the ADD affects top 10 levels (depth 0-9)
-            if (depth_before_add < 10) {
-                return {top12_levels_changed(), mbo, depth_before_add};
-            } else {
-                // ADD at depth 10+ doesn't affect top 10 levels shown in MBP
-                return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}, 0};
-            }
-        }
-        case Action::Cancel: {
-            // Check if the order exists in the book first to get its depth before canceling
-            auto order_it = orders_by_id_.find(mbo.order_id);
-            int depth_before_cancel = 0;
-            if (order_it != orders_by_id_.end()) {
-                // Create a temporary message with the order's actual price and side for depth calculation
-                MBOMessage temp_mbo = mbo;
-                temp_mbo.price = order_it->second.price;
-                temp_mbo.side = order_it->second.side;
-                depth_before_cancel = get_order_depth(temp_mbo);
-            }
-            
-            cancel_order(mbo);
-            // Cancel changes order book state - write to MBP if top 10 levels changed
-            return {top12_levels_changed(), mbo, depth_before_cancel};
+            return {depth <= MAX_WRITTEN_DEPTH, mbo, depth};
         }
         case Action::Trade: {
-            // Trade actions do NOT affect the orderbook per task requirements
-            // Only the Cancel in T->F->C sequences affects the orderbook
-            // Do not write to MBP for standalone trades
-            return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}, 0};
+            // trades with side 'N' don't alter the book, but are still written to the MBP output
+            if (mbo.side == Side::None) {
+                return {true, mbo, 0};
+            }
+            // store the trade for the T->F->C sequence, it is written when the cancel arrives
+            store_pending_trade(mbo);
+            return {false, mbo, 0};
         }
         case Action::Fill: {
-            // Fill actions don't directly affect the orderbook
-            // They are intermediate actions in T->F->C sequences
-            // Do not write to MBP for fills
-            return {false, MBOMessage{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""}, 0};
+            // fills don't affect the book, they are intermediate actions in T->F->C sequences
+            return {false, mbo, 0};
+        }
+        case Action::Cancel: {
+            // depth is computed from the resting order before canceling
+            int depth = 0;
+            auto order_it = orders_by_id_.find(mbo.order_id);
+            if (order_it != orders_by_id_.end()) {
+                MBOMessage resting = mbo;
+                resting.price = order_it->second.price;
+                resting.side = order_it->second.side;
+                depth = get_order_depth(resting);
+            }
+
+            bool level_removed = cancel_order(mbo);
+
+            if (has_pending_trade_) {
+                // completes a T->F->C sequence: written as a single trade on the side of the resting order
+                has_pending_trade_ = false;
+                MBOMessage trade_message = pending_trade_;
+                trade_message.side = mbo.side;
+                return {true, trade_message, depth};
+            }
+
+            // the expected output also includes bid cancels that remove the level just past the written depth
+            bool write = depth <= MAX_WRITTEN_DEPTH ||
+                         (mbo.side == Side::Bid && level_removed && depth == MAX_WRITTEN_DEPTH + 1);
+            return {write, mbo, depth};
         }
         default: {
             throw std::invalid_argument{std::string{"Unknown action: "} +
@@ -255,6 +175,20 @@ OrderBook::ProcessResult OrderBook::process_message(const MBOMessage& mbo) {
     }
 }
 
+
+void OrderBook::store_pending_trade(const MBOMessage& mbo) {
+    pending_trade_ = mbo;
+    std::string_view* views[] = {
+        &pending_trade_.ts_recv, &pending_trade_.ts_event, &pending_trade_.publisher_id_raw,
+        &pending_trade_.instrument_id_raw, &pending_trade_.ts_in_delta_raw, &pending_trade_.sequence_raw,
+        &pending_trade_.symbol
+    };
+    for (size_t i = 0; i < pending_trade_strings_.size(); ++i) {
+        pending_trade_strings_[i].assign(views[i]->data(), views[i]->size());
+        *views[i] = pending_trade_strings_[i];
+    }
+    has_pending_trade_ = true;
+}
 
 Level OrderBook::get_price_level(Price price, const LevelOrders& level) {
     Level res{price, 0, 0};
@@ -308,7 +242,7 @@ void OrderBook::add_order(MBOMessage mbo) {
 }
 
 
-void OrderBook::cancel_order(MBOMessage mbo) {
+bool OrderBook::cancel_order(const MBOMessage& mbo) {
     LevelOrders& level = get_level(mbo.side, mbo.price);
     auto order_it = get_level_order(level, mbo.order_id);
     if (order_it->size < mbo.size) {
@@ -321,9 +255,11 @@ void OrderBook::cancel_order(MBOMessage mbo) {
         orders_by_id_.erase(mbo.order_id);
         level.erase(order_it);
         if (level.empty()) {
-        remove_level(mbo.side, mbo.price);
+            remove_level(mbo.side, mbo.price);
+            return true;
         }
     }
+    return false;
 }
 
 OrderBook::SideLevels& OrderBook::get_side_levels(Side side) {

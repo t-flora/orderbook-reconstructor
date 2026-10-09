@@ -8,6 +8,10 @@ using namespace std;
 
 class OrderBook {
     public:
+        // events at depth 0-10 (the 10 MBP levels, plus the level just past them) are written to the MBP output
+        static constexpr int MAX_WRITTEN_DEPTH = 10;
+
+
         OrderBook() = default;
         std::pair<Level, Level> get_BBO() const;
     
@@ -42,11 +46,11 @@ class OrderBook {
     
         static Level get_price_level(Price price, const LevelOrders& level);
         static LevelOrders::iterator get_level_order(LevelOrders& level, OrderId order_id);
-        bool top12_levels_changed();
     
         void clear_order();
         void add_order(MBOMessage mbo);
-        void cancel_order(MBOMessage mbo);
+        // returns true if the cancel removed the order's price level
+        bool cancel_order(const MBOMessage& mbo);
     
         SideLevels& get_side_levels(Side side);
         LevelOrders& get_level(Side side, Price price);
@@ -61,7 +65,7 @@ class OrderBook {
         // T->F->C sequence tracking
         MBOMessage pending_trade_{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""};
         bool has_pending_trade_{false};
-        
-        // Top 10 level change tracking
-        mutable std::vector<BidAskPair> previous_top12_;
+        // owned copies of the pending trade's string fields, since the views point into the parser's line buffer
+        std::array<std::string, 7> pending_trade_strings_;
+        void store_pending_trade(const MBOMessage& mbo);
    };

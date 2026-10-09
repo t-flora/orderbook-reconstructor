@@ -6,9 +6,12 @@ I built the reconstructor project assuming a stream of events processed sequenti
 - Using `final` classes since they have no derived classes
 - Using `constexpr` where possible
 
-# Required fixes
-- Correct handling of order book depth for output: events with depth greater than 11 are written, and some events with depth = 0 are missed (35/878 lines)
-- Correct handling of order book updates: a few updates are triggered where they shouldn't, or missed when they should. During work on this task, I oscillated between writing too much and too little.
+# MBP output rules
+The output matches `data/mbp.csv` exactly (`make test`). An MBO event is written to the MBP output when:
+- It's an Add or Cancel at depth 0-10 (depth is computed before the event is applied), even if the top 10 levels don't change
+- It's a bid-side Cancel at depth 11 that removes its price level
+- It's a Clear, or a Trade with side `N` (which doesn't alter the book)
+- It completes a T->F->C sequence, which is written as a single Trade on the side of the resting order, using the Trade's fields
 
 # Desired improvements
 - Faster parsing of input values and faster output writing using fixed size char buffers, and using buffers directly

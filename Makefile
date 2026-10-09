@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -Isource
+CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -Isource -MMD -MP
 TARGET = reconstructor_TiagoFlora
 SRCDIR = source
 TESTDIR = tests
@@ -33,10 +33,11 @@ $(BUILDDIR)/test_examples.o: $(TESTDIR)/test_examples.cpp | $(BUILDDIR)
 test: $(BINARY) $(TEST_BINARY)
 	./$(TEST_BINARY)
 
-tests: test
-
 test_examples: $(TEST_BINARY)
 	./$(TEST_BINARY)
+
+# Rebuild objects when included headers change
+-include $(OBJECTS:.o=.d) $(BUILDDIR)/test_examples.d
 
 clean:
 	rm -rf $(BUILDDIR)

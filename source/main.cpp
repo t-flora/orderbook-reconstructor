@@ -7,13 +7,13 @@
 
 int main(int argc, char* argv[]) {
 
-    const std::string input_file = argv[1];
-    const std::string output_file = argc == 3 ? argv[2] : "data/actual_output.csv";
-
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <input_file> [output_file]" << std::endl;
         return 1;
     }
+
+    const std::string input_file = argv[1];
+    const std::string output_file = argc == 3 ? argv[2] : "data/actual_output.csv";
     if (argc == 2) {
         std::cout << "No output file provided, using default: " << output_file << std::endl;
     }
@@ -49,9 +49,8 @@ int main(int argc, char* argv[]) {
             // Apply message to orderbook and get processing result
             auto result = orderbook.process_message(message);
             
-            // Write to MBP only if top 10 levels changed
+            // Write to MBP only for events within the written depth
             if (result.should_write_to_mbp) {
-                // Use depth calculated in ProcessResult (handles depth >= 11 correctly)
                 mbp_writer.write_snapshot(result.message_for_mbp, orderbook.get_snapshot(10), result.depth);
             }
         }

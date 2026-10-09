@@ -1,23 +1,22 @@
 #include "mbp_writer.hpp"
 #include <iomanip>
 #include <sstream>
-#include <cmath>
+#include <string>
 
-// Helper function to format price with smart decimal precision
-std::string format_price(double price) {
-    // Round to 2 decimal places first to avoid floating point precision issues
-    double rounded = std::round(price * 100.0) / 100.0;
-    
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(2) << rounded;
-    std::string str = oss.str();
-    
-    // If it ends with '0', check if we should use 1 decimal place instead
-    if (str.back() == '0' && str[str.length()-2] != '.') {
-        // Remove the trailing zero to show only 1 decimal place
-        str.pop_back();
-    }
-    
+// format a fixed-point nanos price, trimming trailing zeros but keeping at least one decimal (e.g. 13.0, 5.51, 13.575)
+std::string format_price(Price price) {
+    constexpr Price PRICE_SCALE = 1'000'000'000;
+    std::string str = price < 0 ? "-" : "";
+    Price abs_price = price < 0 ? -price : price;
+
+    std::string fractional = std::to_string(abs_price % PRICE_SCALE);
+    fractional.insert(0, 9 - fractional.size(), '0');
+    size_t last_digit = fractional.find_last_not_of('0');
+    fractional.resize(last_digit == std::string::npos ? 1 : last_digit + 1);
+
+    str += std::to_string(abs_price / PRICE_SCALE);
+    str += '.';
+    str += fractional;
     return str;
 }
 
@@ -68,7 +67,7 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const std::vector<BidA
     
     // Write price and size - convert back from nanos to decimal
     if (message.price != 0) {
-        file_ << "," << format_price(message.price / 1E9);
+        file_ << "," << format_price(message.price);
     } else {
         file_ << ",";
     }
@@ -79,13 +78,13 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const std::vector<BidA
           << "," << message.sequence_raw;
     
     // Write bid/ask levels from snapshot
-    for (int i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
         // Get the pair for this level, or use empty values if not enough levels
         const BidAskPair& pair = (i < snapshot.size()) ? snapshot[i] : BidAskPair{0, 0, 0, 0, 0, 0};
         
         // Bid level
         if (pair.bid_px != 0) {
-            file_ << "," << format_price(pair.bid_px / 1E9);
+            file_ << "," << format_price(pair.bid_px);
         } else {
             file_ << ",";
         }
@@ -94,7 +93,7 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const std::vector<BidA
         
         // Ask level
         if (pair.ask_px != 0) {
-            file_ << "," << format_price(pair.ask_px / 1E9);
+            file_ << "," << format_price(pair.ask_px);
         } else {
             file_ << ",";
         }
