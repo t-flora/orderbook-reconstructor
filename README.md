@@ -1,25 +1,55 @@
 # Order book reconstructor
-I built the reconstructor project assuming a stream of events processed sequentially, using C++14. It computes an MBP-10 order book from an MBO dataset, and is divided into 3 main components: MBO parser, order book reconstruction engine, and MBP writer. I drew heavy inspiration from the Databento example to understand the functioning of the order book class.
+I built the reconstructor project assuming a stream of events processed sequentially, using C++17. It computes an MBP-10 order book from an MBO dataset, and is divided into 3 main components: MBO parser, order book reconstruction engine, and MBP writer. I drew heavy inspiration from the Databento example to understand the functioning of the order book class.
+
+## Usage
+```
+make                                                     # builds build/reconstructor_TiagoFlora
+./build/reconstructor_TiagoFlora data/mbo.csv [output]   # output defaults to data/actual_output.csv
+make test                                                # runs on data/mbo.csv and compares against data/mbp.csv
+```
 
 ## Optimization decisions
 - Using `string_view` to avoid heap allocations & memory copying during parsing
 - Using `final` classes since they have no derived classes
 - Using `constexpr` where possible
+- Reading input in 1MB chunks and splitting lines with `memchr`, passing each line to the parser as a view into the chunk buffer
+- Parsing integers in place with `std::from_chars`, and prices directly to fixed-point nanos (no `double` round trip)
+- Formatting each MBP row into a 1MB output buffer with `std::to_chars` and `memcpy`, written to the file in large chunks instead of through `ostream` operators
+- Keeping each price level's total size and order count up to date on every add/cancel, so snapshots don't iterate over orders
+- Building the 10-level snapshot in a single pass over each side, instead of advancing from the best level for every index
+- Storing compact resting orders (id, size, top-of-book flag) in levels instead of full MBO messages
+
+## Performance
+Measured on a 1.18M-event input (`data/mbo.csv` repeated 200 times, each copy starting with a Clear), producing 786k MBP rows (282MB):
+
+| Version | Time | Events/s |
+| --- | --- | --- |
+| Before optimizations | 5.2s | ~230k |
+| After optimizations | 0.7s | ~1.7M |
+
+Both versions produce byte-identical output. Most of the remaining time is writing the output file, followed by row formatting, snapshot building and parsing.
 
 # MBP output rules
-The output matches `data/mbp.csv` exactly (`make test`). An MBO event is written to the MBP output when:
+The output matches `data/mbp.csv` exactly (`make test`). I derived these rules by simulating the book over `data/mbo.csv` and checking which events appear in `data/mbp.csv`, and at which depth. An MBO event is written to the MBP output when:
 - It's an Add or Cancel at depth 0-10 (depth is computed before the event is applied), even if the top 10 levels don't change
 - It's a bid-side Cancel at depth 11 that removes its price level
 - It's a Clear, or a Trade with side `N` (which doesn't alter the book)
 - It completes a T->F->C sequence, which is written as a single Trade on the side of the resting order, using the Trade's fields
 
+The bid-side depth 11 rule is empirical: all 8 such cancels in the sample are written, while ask-side cancels and bid cancels that don't remove the level at depth 11 never are. It looks like a quirk of the tool that generated the reference output, rather than a general MBP-10 rule.
+
+## Fixes to reach an exact match
+- Writing rows based on depth (0-10) instead of comparing the top 12 levels before and after every event
+- Writing Trades with side `N`, which were previously dropped
+- Writing T->F->C trades with the Trade's order ID (0) instead of the Cancel's
+- Keeping owned copies of the pending Trade's string fields: they were views into the line buffer, which is overwritten by the Fill and Cancel lines that follow
+- Formatting prices exactly (e.g. `13.575`), where they were previously rounded to 2 decimals
+- Checking `argc` before reading `argv[1]`, and tracking header dependencies in the Makefile so objects are rebuilt when headers change
+
 # Desired improvements
-- Faster parsing of input values and faster output writing using fixed size char buffers, and using buffers directly
-- Using memory-mapped files for the MBO parser, eliminating string conversions for fast integer parsing
-- Avoiding double conversion for price parsing - parsing directly to fixed-point
+- Using memory-mapped files for the MBO parser, instead of chunked reads
 - Pre-formatted caches for values like prices to avoid formatting multiple times
 - Test alternative containers for order book data structures, e.g. sorted vectors instead of `std::map` if for small vector sizes it's worth it
-- Tracking order book state changes incrementally
 - Defining a Dockerfile for reproducibility in different environments
 
 # Improvements?
@@ -43,5 +73,5 @@ What I had to figure out before starting:
    - Many data fields in the input are just copied to the output file, with no processing. All those fields can be treated as string views to avoid type conversions.
    - Processing a line at a time, it'd be great to use a stack allocation for the buffer holding each line. Running `awk '{print length($0)}' data/sample_dataset.csv | sort -n | tail -1` (on both input/output data) shows how small one can make the char buffer for holding lines in the sample. Going from type specifications, I computed the maximum char length of each field: input buffers for MBO messages can be much smaller since they don't hold the extra 60 fields for bid/ask level data, and have max size of 154 bytes. For cache segment alignment and safety, I set the buffer to 256 bytes (power of two, product of 64)
 6. How should I handle each event in the order book logic?
-   - Running `grep -E "^[0-9]" data/mbo.csv | cut -d',' -f6 | sort | uniq -c` shows there are 5 possible actions, including the 1 clear order book action at the beginning, 11 Trade actions (don't affect order book) and 11 Fill actions (don't affect order book)
-   - It took a while to figure out what 'depth=11' updates were, but I realized they were cancel orders for orders that were pushed out of the top 10 levels of the orderbook.
+   - Running `grep -E "^[0-9]" data/mbo.csv | cut -d',' -f6 | sort | uniq -c` shows there are 5 possible actions, including the 1 clear order book action at the beginning, 46 Trade actions (don't affect order book: 11 are part of T->F->C sequences, 35 have side `N`) and 11 Fill actions (don't affect order book)
+   - It took a while to figure out what 'depth=11' updates were, but I realized they were cancel orders for orders that were pushed out of the top 10 levels of the orderbook. Depth 10 events (Adds and Cancels on the 11th level) are written too, and depth 11 only for bid-side Cancels that remove their level - see MBP output rules above.
