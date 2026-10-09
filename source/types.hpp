@@ -64,6 +64,9 @@ struct BidAskPair {
     Count ask_ct;
 };
 
+constexpr size_t MBP_LEVELS = 10;
+using MBPSnapshot = std::array<BidAskPair, MBP_LEVELS>;
+
 // structs for plain old data
 // data that will just be passed to MBP writer without modification will be stored as string views to avoid conversions
 struct MBOMessage {

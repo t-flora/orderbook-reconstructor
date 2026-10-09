@@ -1,4 +1,6 @@
 #include "order_book.hpp"
+#include <algorithm>
+#include <stdexcept>
 
 // Constructor implementation removed - using default constructor
 std::pair<Level, Level> OrderBook::get_BBO() const {
@@ -39,14 +41,14 @@ Level OrderBook::get_ask_level_by_px(Price px) const {
     return get_price_level(px, level_it->second);
 }
 
-const MBOMessage& OrderBook::get_order(OrderId order_id) {
+const OrderBook::RestingOrder& OrderBook::get_order(OrderId order_id) {
     auto order_it = orders_by_id_.find(order_id);
     if (order_it == orders_by_id_.end()) {
         throw std::invalid_argument{"No order with ID " +
                                     std::to_string(order_id)};
     }
     auto& level = get_level(order_it->second.side, order_it->second.price);
-    return *get_level_order(level, order_id);
+    return *get_level_order(level.orders, order_id);
 }
 
 uint32_t OrderBook::get_queue_pos(OrderId order_id) {
@@ -58,7 +60,7 @@ uint32_t OrderBook::get_queue_pos(OrderId order_id) {
     const auto& level_it =
         get_level(order_it->second.side, order_it->second.price);
     uint32_t prior_size = 0;
-    for (const auto& order : level_it) {
+    for (const auto& order : level_it.orders) {
         if (order.order_id == order_id) {
         break;
         }
@@ -67,23 +69,20 @@ uint32_t OrderBook::get_queue_pos(OrderId order_id) {
     return prior_size;
 }
 
-std::vector<BidAskPair> OrderBook::get_snapshot(std::size_t level_count) const {
-    std::vector<BidAskPair> res;
-    for (size_t i = 0; i < level_count; ++i) {
-        BidAskPair ba_pair{0, 0, 0, 0, 0, 0};
-        auto bid = get_bid_level(i);
-        if (bid) {
-            ba_pair.bid_px = bid.price;
-            ba_pair.bid_sz = bid.size;
-            ba_pair.bid_ct = bid.count;
-        }
-        auto ask = get_ask_level(i);
-        if (ask) {
-            ba_pair.ask_px = ask.price;
-            ba_pair.ask_sz = ask.size;
-            ba_pair.ask_ct = ask.count;
-        }
-        res.emplace_back(ba_pair);
+MBPSnapshot OrderBook::get_snapshot() const {
+    // walk both sides once, instead of advancing from the best level for every index
+    MBPSnapshot res{};
+    auto bid_it = bids_.rbegin(); // reverse iterator to get highest bid prices first
+    for (size_t i = 0; i < MBP_LEVELS && bid_it != bids_.rend(); ++i, ++bid_it) {
+        res[i].bid_px = bid_it->first;
+        res[i].bid_sz = bid_it->second.size;
+        res[i].bid_ct = bid_it->second.count;
+    }
+    auto ask_it = offers_.begin();
+    for (size_t i = 0; i < MBP_LEVELS && ask_it != offers_.end(); ++i, ++ask_it) {
+        res[i].ask_px = ask_it->first;
+        res[i].ask_sz = ask_it->second.size;
+        res[i].ask_ct = ask_it->second.count;
     }
     return res;
 }
@@ -190,21 +189,14 @@ void OrderBook::store_pending_trade(const MBOMessage& mbo) {
     has_pending_trade_ = true;
 }
 
-Level OrderBook::get_price_level(Price price, const LevelOrders& level) {
-    Level res{price, 0, 0};
-    for (const auto& order : level) {
-        if (!order.flags.has(F_TOB)) { // if order is not top-of-book
-            ++res.count;
-        }
-        res.size += order.size;
-    }
-    return res;
+Level OrderBook::get_price_level(Price price, const PriceLevel& level) {
+    return Level{price, level.size, level.count};
 }
 
 OrderBook::LevelOrders::iterator OrderBook::get_level_order(OrderBook::LevelOrders& level, OrderId order_id) {
     auto order_it = std::find_if(
         level.begin(), level.end(),
-        [order_id](const MBOMessage& order) { return order.order_id == order_id; }
+        [order_id](const RestingOrder& order) { return order.order_id == order_id; }
     );
     if (order_it == level.end()) {
         throw std::invalid_argument{"No order with ID " +
@@ -219,19 +211,23 @@ void OrderBook::clear_order() {
     bids_.clear();
 }
 
-void OrderBook::add_order(MBOMessage mbo) {
+void OrderBook::add_order(const MBOMessage& mbo) {
     if (mbo.flags.has(F_TOB)) { // check if order is top-of-book
         SideLevels& levels = get_side_levels(mbo.side);
         levels.clear();
         // 0 indicates the side's book should be cleared
         // and doesn't represent an order that should be added
         if (mbo.price != 0) {
-            LevelOrders level = {mbo};
-            levels.emplace(mbo.price, level);
+            // top-of-book orders count towards size but not count
+            PriceLevel& level = levels[mbo.price];
+            level.size = mbo.size;
+            level.orders.push_back(RestingOrder{mbo.order_id, mbo.size, true});
         }
     } else {
-        LevelOrders& level = get_or_insert_level(mbo.side, mbo.price);
-        level.emplace_back(mbo);
+        PriceLevel& level = get_or_insert_level(mbo.side, mbo.price);
+        level.orders.push_back(RestingOrder{mbo.order_id, mbo.size, false});
+        level.size += mbo.size;
+        ++level.count;
         auto res = orders_by_id_.emplace(mbo.order_id,
                                         PriceAndSide{mbo.price, mbo.side});
         if (!res.second) {
@@ -243,18 +239,22 @@ void OrderBook::add_order(MBOMessage mbo) {
 
 
 bool OrderBook::cancel_order(const MBOMessage& mbo) {
-    LevelOrders& level = get_level(mbo.side, mbo.price);
-    auto order_it = get_level_order(level, mbo.order_id);
+    PriceLevel& level = get_level(mbo.side, mbo.price);
+    auto order_it = get_level_order(level.orders, mbo.order_id);
     if (order_it->size < mbo.size) {
         throw std::logic_error{
             "Tried to cancel more size than existed for order ID " +
             std::to_string(mbo.order_id)};
     }
     order_it->size -= mbo.size;
+    level.size -= mbo.size;
     if (order_it->size == 0) {
+        if (!order_it->is_tob) {
+            --level.count;
+        }
         orders_by_id_.erase(mbo.order_id);
-        level.erase(order_it);
-        if (level.empty()) {
+        level.orders.erase(order_it);
+        if (level.orders.empty()) {
             remove_level(mbo.side, mbo.price);
             return true;
         }
@@ -278,7 +278,7 @@ OrderBook::SideLevels& OrderBook::get_side_levels(Side side) {
 }
 
 
-OrderBook::LevelOrders& OrderBook::get_level(Side side, Price price) {
+OrderBook::PriceLevel& OrderBook::get_level(Side side, Price price) {
     SideLevels& levels = get_side_levels(side);
     auto level_it = levels.find(price);
     if (level_it == levels.end()) {
@@ -291,7 +291,7 @@ OrderBook::LevelOrders& OrderBook::get_level(Side side, Price price) {
     return level_it->second;
 }
 
-OrderBook::LevelOrders& OrderBook::get_or_insert_level(Side side, Price price) {
+OrderBook::PriceLevel& OrderBook::get_or_insert_level(Side side, Price price) {
     SideLevels& levels = get_side_levels(side);
     return levels[price];
 }

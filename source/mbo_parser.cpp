@@ -1,5 +1,16 @@
 #include "mbo_parser.hpp"
+#include <charconv>
 #include <cstring>
+
+namespace {
+    // parse integers in place with from_chars, avoiding the string copies needed by stoul
+    template <typename UInt>
+    inline UInt parse_uint(std::string_view str) {
+        UInt value = 0;
+        std::from_chars(str.data(), str.data() + str.size(), value);
+        return value;
+    }
+}
 
 StreamingMBOParser::StreamingMBOParser() {
     fields_.fill(std::string_view());
@@ -34,24 +45,15 @@ bool StreamingMBOParser::parse_MBO_line(const std::string_view line, MBOMessage&
     message.price = parse_price(fields_[7]);
     
     // Parse size
-    if (!fields_[8].empty()) {
-        message.size = static_cast<Size>(std::stoul(std::string(fields_[8])));
-    }
+    message.size = parse_uint<Size>(fields_[8]);
     
     // Skip channel_id (fields_[9]) - constant
     
     // Parse order_id
-    if (!fields_[10].empty()) {
-        message.order_id = static_cast<OrderId>(std::stoull(std::string(fields_[10])));
-    }
+    message.order_id = parse_uint<OrderId>(fields_[10]);
     
     // Parse flags
-    if (!fields_[11].empty()) {
-        uint8_t flags_value = static_cast<uint8_t>(std::stoul(std::string(fields_[11])));
-        message.flags = Flag{flags_value};
-    } else {
-        message.flags = Flag{0};
-    }
+    message.flags = Flag{parse_uint<uint8_t>(fields_[11])};
     message.ts_in_delta_raw = fields_[12];
     message.sequence_raw = fields_[13];
     message.symbol = fields_[14];

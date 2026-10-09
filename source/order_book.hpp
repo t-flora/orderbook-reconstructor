@@ -3,6 +3,8 @@
 #include <map>
 #include <array>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 using namespace std;
 
@@ -21,10 +23,17 @@ class OrderBook {
         Level get_bid_level_by_px(Price px) const;
         Level get_ask_level_by_px(Price px) const;
     
-        const MBOMessage& get_order(OrderId order_id);
+        // compact resting order, so levels don't store full MBO messages
+        struct RestingOrder {
+            OrderId order_id;
+            Size size;
+            bool is_tob;
+        };
+
+        const RestingOrder& get_order(OrderId order_id);
         uint32_t get_queue_pos(OrderId order_id);
     
-        std::vector<BidAskPair> get_snapshot(size_t level_count = 1) const;
+        MBPSnapshot get_snapshot() const;
         int get_order_depth(const MBOMessage& mbo) const;
 
         struct ProcessResult {
@@ -36,25 +45,31 @@ class OrderBook {
         ProcessResult process_message(const MBOMessage& mbo);
    
     private:
-        using LevelOrders = std::vector<MBOMessage>;
+        using LevelOrders = std::vector<RestingOrder>;
+        // size and count are kept up to date as orders change, so snapshots don't iterate over orders
+        struct PriceLevel {
+            Size size{0};
+            Count count{0};
+            LevelOrders orders;
+        };
         struct PriceAndSide {
             Price price;
             Side side;
         };
         using Orders = std::unordered_map<OrderId, PriceAndSide>;
-        using SideLevels = std::map<Price, LevelOrders>;
+        using SideLevels = std::map<Price, PriceLevel>;
     
-        static Level get_price_level(Price price, const LevelOrders& level);
+        static Level get_price_level(Price price, const PriceLevel& level);
         static LevelOrders::iterator get_level_order(LevelOrders& level, OrderId order_id);
     
         void clear_order();
-        void add_order(MBOMessage mbo);
+        void add_order(const MBOMessage& mbo);
         // returns true if the cancel removed the order's price level
         bool cancel_order(const MBOMessage& mbo);
     
         SideLevels& get_side_levels(Side side);
-        LevelOrders& get_level(Side side, Price price);
-        LevelOrders& get_or_insert_level(Side side, Price price);
+        PriceLevel& get_level(Side side, Price price);
+        PriceLevel& get_or_insert_level(Side side, Price price);
     
         void remove_level(Side side, Price price);
     
