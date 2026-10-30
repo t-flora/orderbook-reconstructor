@@ -1,5 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -Isource -MMD -MP
+CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -pthread -Isource -MMD -MP
+LDFLAGS = -pthread
 TARGET = reconstructor_TiagoFlora
 SRCDIR = source
 TESTDIR = tests
@@ -18,14 +19,14 @@ $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
 $(BINARY): $(OBJECTS) | $(BUILDDIR)
-	$(CXX) $(OBJECTS) -o $(BINARY)
+	$(CXX) $(LDFLAGS) $(OBJECTS) -o $(BINARY)
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Test compilation
 $(TEST_BINARY): $(LIB_OBJECTS) $(BUILDDIR)/test_examples.o | $(BUILDDIR)
-	$(CXX) $(LIB_OBJECTS) $(BUILDDIR)/test_examples.o -o $(TEST_BINARY)
+	$(CXX) $(LDFLAGS) $(LIB_OBJECTS) $(BUILDDIR)/test_examples.o -o $(TEST_BINARY)
 
 $(BUILDDIR)/test_examples.o: $(TESTDIR)/test_examples.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@

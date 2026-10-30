@@ -25,9 +25,10 @@ Measured on a 1.18M-event input (`data/mbo.csv` repeated 200 times, each copy st
 | Version | Time | Events/s |
 | --- | --- | --- |
 | Before optimizations | 5.2s | ~230k |
-| After optimizations | 0.7s | ~1.7M |
+| After single-threaded optimizations | 0.66s | ~1.8M |
+| + file writes on a separate thread | 0.52s | ~2.3M |
 
-Both versions produce byte-identical output. Most of the remaining time is writing the output file, followed by row formatting, snapshot building and parsing.
+All versions produce byte-identical output. Parallel timings are on an 8-core machine. Most of the remaining time is row formatting, followed by order book updates, snapshot building and parsing.
 
 # MBP output rules
 The output matches `data/mbp.csv` exactly (`make test`). I derived these rules by simulating the book over `data/mbo.csv` and checking which events appear in `data/mbp.csv`, and at which depth. An MBO event is written to the MBP output when:

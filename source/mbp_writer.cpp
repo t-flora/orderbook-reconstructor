@@ -58,25 +58,44 @@ namespace {
 }
 
 MBPWriter::MBPWriter(const std::string& filename)
-    : file_(filename, std::ios::binary), buffer_(MBP_OUTPUT_BUFFER_SIZE), buffer_used_(0), row_index_(0) {
+    : file_(filename, std::ios::binary), buffer_{std::vector<char>(MBP_OUTPUT_BUFFER_SIZE), 0}, row_index_(0) {
     if (!file_.is_open()) {
         throw std::runtime_error("Could not open output file: " + filename);
     }
 
     // Write header
     write_header();
+
+    for (size_t i = 1; i < MBP_OUTPUT_BUFFER_COUNT; ++i) {
+        free_buffers_.push(OutputBuffer{std::vector<char>(MBP_OUTPUT_BUFFER_SIZE), 0});
+    }
+    file_writer_ = std::thread(&MBPWriter::write_buffers, this);
 }
 
 MBPWriter::~MBPWriter() {
     flush();
+    full_buffers_.close();
+    file_writer_.join();
     if (file_.is_open()) {
         file_.close();
     }
 }
 
+// hand the filled buffer to the writer thread, and continue with a buffer it has finished writing
 void MBPWriter::flush() {
-    file_.write(buffer_.data(), static_cast<std::streamsize>(buffer_used_));
-    buffer_used_ = 0;
+    if (buffer_.used == 0) {
+        return;
+    }
+    full_buffers_.push(std::move(buffer_));
+    buffer_ = std::move(*free_buffers_.pop());
+}
+
+void MBPWriter::write_buffers() {
+    while (std::optional<OutputBuffer> buffer = full_buffers_.pop()) {
+        file_.write(buffer->data.data(), static_cast<std::streamsize>(buffer->used));
+        buffer->used = 0;
+        free_buffers_.push(std::move(*buffer));
+    }
 }
 
 void MBPWriter::write_header() {
@@ -100,13 +119,13 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const MBPSnapshot& sna
     const size_t max_line_size = MAX_MBP_LINE_SIZE + 2 * message.ts_event.size() + message.publisher_id_raw.size() +
                                  message.instrument_id_raw.size() + message.ts_in_delta_raw.size() +
                                  message.sequence_raw.size() + message.symbol.size();
-    if (buffer_used_ + max_line_size > buffer_.size()) {
+    if (buffer_.used + max_line_size > buffer_.data.size()) {
         flush();
-        if (max_line_size > buffer_.size()) {
-            buffer_.resize(max_line_size);
+        if (max_line_size > buffer_.data.size()) {
+            buffer_.data.resize(max_line_size);
         }
     }
-    char* out = buffer_.data() + buffer_used_;
+    char* out = buffer_.data.data() + buffer_.used;
 
     // Write row index (unnamed first column)
     append_int(out, row_index_++);
@@ -159,5 +178,5 @@ void MBPWriter::write_snapshot(const MBOMessage& message, const MBPSnapshot& sna
     append_int(out, message.order_id);
     append_view(out, "\r\n");
 
-    buffer_used_ = static_cast<size_t>(out - buffer_.data());
+    buffer_.used = static_cast<size_t>(out - buffer_.data.data());
 }
