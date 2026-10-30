@@ -3,14 +3,24 @@
 #include "mbp_writer.hpp"
 #include "order_book.hpp"
 #include "types.hpp"
+#include <algorithm>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 // the pipeline runs in stages on separate threads:
 // parsing (MBOReader) -> order book updates and snapshots (this thread) -> formatting and file writes (MBPWriter)
-constexpr size_t FORMAT_THREADS = 1;
+// the order book is sequential and sets the pace, and 3 format threads are enough to keep up with it
+constexpr size_t MAX_FORMAT_THREADS = 3;
+// the parser, order book and file writer threads
+constexpr size_t OTHER_THREADS = 3;
+
+size_t format_thread_count() {
+    const size_t cores = std::thread::hardware_concurrency();
+    return std::clamp(cores > OTHER_THREADS ? cores - OTHER_THREADS : 1, size_t{1}, MAX_FORMAT_THREADS);
+}
 
 int main(int argc, char* argv[]) {
 
@@ -30,7 +40,7 @@ int main(int argc, char* argv[]) {
         MappedFile input(input_file);
         MBOReader mbo_reader(input.contents());
         OrderBook orderbook;
-        MBPWriter mbp_writer(output_file, FORMAT_THREADS);
+        MBPWriter mbp_writer(output_file, format_thread_count());
 
         MBPBatch batch = mbp_writer.acquire_batch();
         while (std::optional<std::vector<MBOMessage>> messages = mbo_reader.next_batch()) {

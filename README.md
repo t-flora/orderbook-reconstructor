@@ -23,7 +23,7 @@ make test                                                # runs on data/mbo.csv 
 Each event depends on the book's state after the previous one, so the order book itself runs on a single thread. The work around it runs in parallel, as a pipeline:
 1. A parser thread parses lines into batches of 4096 messages (`MBOReader`)
 2. The main thread applies each message to the order book, and collects rows to write with their snapshot into batches of 2048 rows
-3. A format thread formats row batches into output buffers (`MBPWriter`)
+3. Up to 3 format threads format row batches into output buffers (`MBPWriter`)
 4. A file writer thread writes formatted batches to the file, in the order they were submitted
 
 Threads hand over batches through `BlockingQueue`s, since handing over single events would cost more than processing them. Batches are recycled once they've been used, so buffers aren't reallocated. Rows hold views into the input, which is safe because the input stays mapped until every row is written.
@@ -37,8 +37,9 @@ Measured on a 1.18M-event input (`data/mbo.csv` repeated 200 times, each copy st
 | After single-threaded optimizations | 0.66s | ~1.8M |
 | + file writes on a separate thread | 0.52s | ~2.3M |
 | + parsing, order book and formatting in a pipeline | 0.22s | ~5.4M |
+| + 3 format threads | 0.20s | ~5.9M |
 
-All versions produce byte-identical output. Parallel timings are on an 8-core machine. The order book thread and the format thread now take about as long as each other, and the whole run takes about as long as either of them.
+All versions produce byte-identical output. Parallel timings are on an 8-core machine. The order book thread is now busy for the whole run and never waits on the other stages, so it sets the pace: further gains have to come from making order book updates and snapshots faster.
 
 # MBP output rules
 The output matches `data/mbp.csv` exactly (`make test`). I derived these rules by simulating the book over `data/mbo.csv` and checking which events appear in `data/mbp.csv`, and at which depth. An MBO event is written to the MBP output when:
