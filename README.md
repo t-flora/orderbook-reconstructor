@@ -12,12 +12,21 @@ make test                                                # runs on data/mbo.csv 
 - Using `string_view` to avoid heap allocations & memory copying during parsing
 - Using `final` classes since they have no derived classes
 - Using `constexpr` where possible
-- Reading input in 1MB chunks and splitting lines with `memchr`, passing each line to the parser as a view into the chunk buffer
+- Memory-mapping the input file, so each line is passed to the parser as a view into the mapping, and views stay valid for the whole run
 - Parsing integers in place with `std::from_chars`, and prices directly to fixed-point nanos (no `double` round trip)
-- Formatting each MBP row into a 1MB output buffer with `std::to_chars` and `memcpy`, written to the file in large chunks instead of through `ostream` operators
+- Formatting MBP rows into large output buffers with `std::to_chars` and `memcpy`, written to the file in large chunks instead of through `ostream` operators
 - Keeping each price level's total size and order count up to date on every add/cancel, so snapshots don't iterate over orders
 - Building the 10-level snapshot in a single pass over each side, instead of advancing from the best level for every index
 - Storing compact resting orders (id, size, top-of-book flag) in levels instead of full MBO messages
+
+## Parallel pipeline
+Each event depends on the book's state after the previous one, so the order book itself runs on a single thread. The work around it runs in parallel, as a pipeline:
+1. A parser thread parses lines into batches of 4096 messages (`MBOReader`)
+2. The main thread applies each message to the order book, and collects rows to write with their snapshot into batches of 2048 rows
+3. A format thread formats row batches into output buffers (`MBPWriter`)
+4. A file writer thread writes formatted batches to the file, in the order they were submitted
+
+Threads hand over batches through `BlockingQueue`s, since handing over single events would cost more than processing them. Batches are recycled once they've been used, so buffers aren't reallocated. Rows hold views into the input, which is safe because the input stays mapped until every row is written.
 
 ## Performance
 Measured on a 1.18M-event input (`data/mbo.csv` repeated 200 times, each copy starting with a Clear), producing 786k MBP rows (282MB):
@@ -27,8 +36,9 @@ Measured on a 1.18M-event input (`data/mbo.csv` repeated 200 times, each copy st
 | Before optimizations | 5.2s | ~230k |
 | After single-threaded optimizations | 0.66s | ~1.8M |
 | + file writes on a separate thread | 0.52s | ~2.3M |
+| + parsing, order book and formatting in a pipeline | 0.22s | ~5.4M |
 
-All versions produce byte-identical output. Parallel timings are on an 8-core machine. Most of the remaining time is row formatting, followed by order book updates, snapshot building and parsing.
+All versions produce byte-identical output. Parallel timings are on an 8-core machine. The order book thread and the format thread now take about as long as each other, and the whole run takes about as long as either of them.
 
 # MBP output rules
 The output matches `data/mbp.csv` exactly (`make test`). I derived these rules by simulating the book over `data/mbo.csv` and checking which events appear in `data/mbp.csv`, and at which depth. An MBO event is written to the MBP output when:
@@ -43,12 +53,11 @@ The bid-side depth 11 rule is empirical: all 8 such cancels in the sample are wr
 - Writing rows based on depth (0-10) instead of comparing the top 12 levels before and after every event
 - Writing Trades with side `N`, which were previously dropped
 - Writing T->F->C trades with the Trade's order ID (0) instead of the Cancel's
-- Keeping owned copies of the pending Trade's string fields: they were views into the line buffer, which is overwritten by the Fill and Cancel lines that follow
+- Keeping the pending Trade's string fields valid until its Cancel arrives: they were views into a line buffer that the following Fill and Cancel lines overwrote. They first became owned copies, and are now views into the memory-mapped input, which stays valid for the whole run
 - Formatting prices exactly (e.g. `13.575`), where they were previously rounded to 2 decimals
 - Checking `argc` before reading `argv[1]`, and tracking header dependencies in the Makefile so objects are rebuilt when headers change
 
 # Desired improvements
-- Using memory-mapped files for the MBO parser, instead of chunked reads
 - Pre-formatted caches for values like prices to avoid formatting multiple times
 - Test alternative containers for order book data structures, e.g. sorted vectors instead of `std::map` if for small vector sizes it's worth it
 - Defining a Dockerfile for reproducibility in different environments

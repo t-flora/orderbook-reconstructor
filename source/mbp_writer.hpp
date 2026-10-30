@@ -22,35 +22,55 @@ constexpr size_t MAX_MBP_LINE_SIZE =
     2 // \r\n
 ;
 
-// rows are formatted into a buffer and written to the file in large chunks
-constexpr size_t MBP_OUTPUT_BUFFER_SIZE = 1 << 20;
-// two buffers, so one can be filled while the other is written
-constexpr size_t MBP_OUTPUT_BUFFER_COUNT = 2;
+// rows are handed over in batches, since handing them over one at a time would cost more than formatting them
+constexpr size_t MBP_ROWS_PER_BATCH = 2048;
+// rows average ~360 bytes, so a batch's output usually fits without growing the buffer
+constexpr size_t MBP_BATCH_OUTPUT_SIZE = MBP_ROWS_PER_BATCH * 512;
+
+// a row of the MBP output: the message, and the top levels of the book after it was applied
+struct MBPRow {
+    MBOMessage message;
+    MBPSnapshot snapshot;
+    int depth;
+};
+
+struct MBPBatch {
+    size_t sequence{0}; // submission order, so batches formatted out of order are still written in order
+    size_t first_row{0}; // row index of rows[0]
+    std::vector<MBPRow> rows;
+    std::vector<char> output; // formatted rows
+    size_t output_size{0};
+};
 
 
+// formats rows on format threads and writes them on a file writer thread, in the order they were submitted
+// row messages are views into the input, which must outlive the writer
 class MBPWriter final {
     private:
-        struct OutputBuffer {
-            std::vector<char> data;
-            size_t used;
-        };
-
         std::ofstream file_;
-        OutputBuffer buffer_;
-        size_t row_index_;
+        size_t next_sequence_{0};
+        size_t next_row_{0};
+        bool closed_{false};
 
-        // filled buffers are written to the file on a separate thread, then handed back for reuse
-        BlockingQueue<OutputBuffer> free_buffers_;
-        BlockingQueue<OutputBuffer> full_buffers_;
+        // batches cycle from free -> filled by the caller -> formatted -> written -> free
+        BlockingQueue<MBPBatch> free_batches_;
+        BlockingQueue<MBPBatch> unformatted_batches_;
+        BlockingQueue<MBPBatch> formatted_batches_;
+        std::vector<std::thread> formatters_;
         std::thread file_writer_;
 
         void write_header();
-        void flush();
-        void write_buffers();
+        void format_batches();
+        void write_batches();
 
     public:
-        MBPWriter(const std::string& filename);
+        MBPWriter(const std::string& filename, size_t format_threads);
         ~MBPWriter();
 
-        void write_snapshot(const MBOMessage& message, const MBPSnapshot& snapshot, int depth = -1);
+        // returns an empty batch to fill with rows, waiting for one to be written if none are free
+        MBPBatch acquire_batch();
+        // queues the batch to be written after every previously submitted batch
+        void submit(MBPBatch batch);
+        // writes every submitted batch and closes the file
+        void close();
 };

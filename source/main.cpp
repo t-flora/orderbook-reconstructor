@@ -1,53 +1,16 @@
-#include "mbo_parser.hpp"
+#include "mapped_file.hpp"
+#include "mbo_reader.hpp"
 #include "mbp_writer.hpp"
 #include "order_book.hpp"
 #include "types.hpp"
-#include <cstring>
 #include <iostream>
-#include <fstream>
-#include <string_view>
+#include <optional>
+#include <string>
 #include <vector>
 
-// input is read in large chunks, and each line is passed to the callback as a view into the chunk buffer
-constexpr size_t INPUT_BUFFER_SIZE = 1 << 20;
-
-template <typename Callback>
-void for_each_line(std::istream& input, Callback&& callback) {
-    std::vector<char> buffer(INPUT_BUFFER_SIZE);
-    size_t filled = 0;
-    bool end_of_input = false;
-
-    while (!end_of_input) {
-        input.read(buffer.data() + filled, static_cast<std::streamsize>(buffer.size() - filled));
-        filled += static_cast<size_t>(input.gcount());
-        end_of_input = !input;
-
-        size_t start = 0;
-        while (start < filled) {
-            const char* data = buffer.data();
-            const void* newline = std::memchr(data + start, '\n', filled - start);
-            if (newline == nullptr && !end_of_input) {
-                break; // incomplete line, read more input first
-            }
-            size_t end = newline ? static_cast<size_t>(static_cast<const char*>(newline) - data) : filled;
-
-            std::string_view line(data + start, end - start);
-            if (!line.empty() && line.back() == '\r') {
-                line.remove_suffix(1);
-            }
-            callback(line);
-            start = end + 1;
-        }
-
-        // keep the incomplete line at the front of the buffer, growing it if a line doesn't fit
-        size_t remaining = start < filled ? filled - start : 0;
-        std::memmove(buffer.data(), buffer.data() + filled - remaining, remaining);
-        filled = remaining;
-        if (filled == buffer.size()) {
-            buffer.resize(buffer.size() * 2);
-        }
-    }
-}
+// the pipeline runs in stages on separate threads:
+// parsing (MBOReader) -> order book updates and snapshots (this thread) -> formatting and file writes (MBPWriter)
+constexpr size_t FORMAT_THREADS = 1;
 
 int main(int argc, char* argv[]) {
 
@@ -62,41 +25,37 @@ int main(int argc, char* argv[]) {
         std::cout << "No output file provided, using default: " << output_file << std::endl;
     }
 
-    std::ifstream input_file_stream(input_file, std::ios::binary);
-    if (!input_file_stream.is_open()) {
-        std::cerr << "Error: Could not open input file: " << input_file << std::endl;
+    try {
+        // declared first so it outlives the reader and writer, which hold views into it
+        MappedFile input(input_file);
+        MBOReader mbo_reader(input.contents());
+        OrderBook orderbook;
+        MBPWriter mbp_writer(output_file, FORMAT_THREADS);
+
+        MBPBatch batch = mbp_writer.acquire_batch();
+        while (std::optional<std::vector<MBOMessage>> messages = mbo_reader.next_batch()) {
+            for (const MBOMessage& message : *messages) {
+                // Apply message to orderbook and get processing result
+                auto result = orderbook.process_message(message);
+
+                // Write to MBP only for events within the written depth
+                if (!result.should_write_to_mbp) {
+                    continue;
+                }
+                batch.rows.push_back(MBPRow{result.message_for_mbp, orderbook.get_snapshot(), result.depth});
+                if (batch.rows.size() == MBP_ROWS_PER_BATCH) {
+                    mbp_writer.submit(std::move(batch));
+                    batch = mbp_writer.acquire_batch();
+                }
+            }
+            mbo_reader.recycle(std::move(*messages));
+        }
+        mbp_writer.submit(std::move(batch));
+        mbp_writer.close();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
-
-    StreamingMBOParser mbo_parser;
-    OrderBook orderbook;
-    MBPWriter mbp_writer(output_file);
-
-    // Skip header line
-    bool first_line = true;
-
-    for_each_line(input_file_stream, [&](std::string_view line) {
-        if (first_line) {
-            first_line = false;
-            return;
-        }
-
-        // Create MBOMessage with proper initialization
-        MBOMessage message{
-            Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)},
-            "", "", "", "", "", "", ""
-        };
-
-        if (mbo_parser.parse_MBO_line(line, message)) {
-            // Apply message to orderbook and get processing result
-            auto result = orderbook.process_message(message);
-
-            // Write to MBP only for events within the written depth
-            if (result.should_write_to_mbp) {
-                mbp_writer.write_snapshot(result.message_for_mbp, orderbook.get_snapshot(), result.depth);
-            }
-        }
-    });
 
     return 0;
 }

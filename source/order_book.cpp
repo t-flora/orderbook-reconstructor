@@ -134,7 +134,8 @@ OrderBook::ProcessResult OrderBook::process_message(const MBOMessage& mbo) {
                 return {true, mbo, 0};
             }
             // store the trade for the T->F->C sequence, it is written when the cancel arrives
-            store_pending_trade(mbo);
+            pending_trade_ = mbo;
+            has_pending_trade_ = true;
             return {false, mbo, 0};
         }
         case Action::Fill: {
@@ -174,20 +175,6 @@ OrderBook::ProcessResult OrderBook::process_message(const MBOMessage& mbo) {
     }
 }
 
-
-void OrderBook::store_pending_trade(const MBOMessage& mbo) {
-    pending_trade_ = mbo;
-    std::string_view* views[] = {
-        &pending_trade_.ts_recv, &pending_trade_.ts_event, &pending_trade_.publisher_id_raw,
-        &pending_trade_.instrument_id_raw, &pending_trade_.ts_in_delta_raw, &pending_trade_.sequence_raw,
-        &pending_trade_.symbol
-    };
-    for (size_t i = 0; i < pending_trade_strings_.size(); ++i) {
-        pending_trade_strings_[i].assign(views[i]->data(), views[i]->size());
-        *views[i] = pending_trade_strings_[i];
-    }
-    has_pending_trade_ = true;
-}
 
 Level OrderBook::get_price_level(Price price, const PriceLevel& level) {
     return Level{price, level.size, level.count};

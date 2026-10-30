@@ -78,9 +78,7 @@ class OrderBook {
         SideLevels bids_;
         
         // T->F->C sequence tracking
+        // the pending trade's string fields are views into the input, which must outlive the book
         MBOMessage pending_trade_{Action::Add, Side::None, 0, 0, 0, Flag{static_cast<uint8_t>(0)}, "", "", "", "", "", "", ""};
         bool has_pending_trade_{false};
-        // owned copies of the pending trade's string fields, since the views point into the parser's line buffer
-        std::array<std::string, 7> pending_trade_strings_;
-        void store_pending_trade(const MBOMessage& mbo);
    };
